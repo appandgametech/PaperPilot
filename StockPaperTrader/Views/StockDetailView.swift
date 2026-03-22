@@ -45,9 +45,10 @@ struct StockDetailView: View {
                     Button { showInfo = true } label: {
                         Image(systemName: "info.circle")
                     }
-                    if !stockService.watchlist.contains(symbol) {
+                    let currentWatchlist = stockService.watchlistForHub(portfolio.activeHub)
+                    if !currentWatchlist.contains(symbol) {
                         Button {
-                            stockService.addToWatchlist(symbol)
+                            stockService.addToWatchlist(symbol, hub: portfolio.activeHub)
                             HapticManager.selectionFeedback()
                         } label: {
                             Image(systemName: "plus.circle")
@@ -60,13 +61,13 @@ struct StockDetailView: View {
             }
         }
         .refreshable {
-            await stockService.fetchQuotes(for: [symbol])
+            await stockService.fetchQuotesForHub(portfolio.activeHub, symbols: [symbol])
         }
         .task {
-            chartData = await stockService.fetchChartData(symbol: symbol, timeframe: selectedTimeframe)
+            chartData = await stockService.fetchChartDataForHub(portfolio.activeHub, symbol: symbol, timeframe: selectedTimeframe)
         }
         .onChange(of: selectedTimeframe) { _, _ in
-            Task { chartData = await stockService.fetchChartData(symbol: symbol, timeframe: selectedTimeframe) }
+            Task { chartData = await stockService.fetchChartDataForHub(portfolio.activeHub, symbol: symbol, timeframe: selectedTimeframe) }
         }
         .sheet(isPresented: $showTradeSheet) {
             if let quote {

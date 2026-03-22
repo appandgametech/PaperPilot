@@ -6,7 +6,7 @@ struct NewsView: View {
     @State private var isLoading = false
     @State private var selectedSymbol: String = "all"
 
-    private var symbols: [String] { ["all"] + stockService.watchlist }
+    private var symbols: [String] { ["all"] + stockService.watchlistForHub(.paper) }
 
     var body: some View {
         List {
@@ -96,7 +96,7 @@ struct NewsView: View {
 
     private func loadNews() async {
         isLoading = true
-        let query = selectedSymbol == "all" ? stockService.watchlist.prefix(3).joined(separator: ",") : selectedSymbol
+        let query = selectedSymbol == "all" ? stockService.watchlistForHub(.paper).prefix(3).joined(separator: ",") : selectedSymbol
         newsItems = await fetchYahooNews(query: query)
         isLoading = false
     }

@@ -76,7 +76,7 @@ struct RiskCalculatorView: View {
                     .onChange(of: symbol) { _, newValue in
                         let upper = newValue.uppercased()
                         if stockService.quotes[upper] == nil && upper.count >= 1 {
-                            Task { await stockService.fetchQuotes(for: [upper]) }
+                            Task { await stockService.fetchQuotesForHub(.paper, symbols: [upper]) }
                         }
                         if currentPrice > 0 && entryPrice.isEmpty {
                             entryPrice = String(format: "%.2f", currentPrice)

@@ -140,7 +140,7 @@ struct ScreenerView: View {
             // Default: scan all sector ETFs + popular stocks
             symbols = ["SPY", "QQQ", "DIA", "IWM"] + StockSector.technology.symbols.prefix(10) + StockSector.healthcare.symbols.prefix(5) + StockSector.finance.symbols.prefix(5) + StockSector.energy.symbols.prefix(5)
         }
-        await stockService.fetchQuotes(for: symbols)
+        await stockService.fetchQuotesForHub(.paper, symbols: symbols)
         results = symbols.compactMap { stockService.quotes[$0] }
         hasSearched = true
         isLoading = false

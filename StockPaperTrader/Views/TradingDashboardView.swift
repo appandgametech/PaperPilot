@@ -27,6 +27,9 @@ struct TradingDashboardView: View {
 
     var body: some View {
         NavigationStack {
+            if !hubIsConnected {
+                notConnectedView
+            } else {
             ScrollView {
                 VStack(spacing: 12) {
                     // Symbol picker
@@ -62,6 +65,7 @@ struct TradingDashboardView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 20)
             }
+            } // end else
             .navigationTitle("\(portfolio.activeHub.rawValue) Charts")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -117,13 +121,17 @@ struct TradingDashboardView: View {
         }
     }
 
-    // Hub-specific default symbols
+    // Hub-specific default symbols — no commingling
     private var hubSymbols: [String] {
+        stockService.watchlistForHub(portfolio.activeHub)
+    }
+
+    // Whether the current hub has valid credentials
+    private var hubIsConnected: Bool {
         switch portfolio.activeHub {
-        case .paper, .equities:
-            return stockService.watchlist
-        case .futures:
-            return stockService.futuresSymbols
+        case .paper: return true
+        case .equities: return !stockService.alpacaApiKey.isEmpty && !stockService.alpacaSecretKey.isEmpty
+        case .futures: return !stockService.ntUsername.isEmpty && !stockService.ntPassword.isEmpty
         }
     }
 
@@ -214,20 +222,14 @@ struct TradingDashboardView: View {
     }
 
     private func loadChart() async {
-        isLoadingChart = true
-        switch portfolio.activeHub {
-        case .paper, .futures:
-            chartData = await stockService.fetchChartData(symbol: selectedSymbol, timeframe: timeframe)
-        case .equities:
-            if !stockService.alpacaApiKey.isEmpty {
-                chartData = await stockService.fetchAlpacaBars(symbol: selectedSymbol, timeframe: timeframe)
-                if chartData.isEmpty {
-                    chartData = await stockService.fetchChartData(symbol: selectedSymbol, timeframe: timeframe)
-                }
-            } else {
-                chartData = await stockService.fetchChartData(symbol: selectedSymbol, timeframe: timeframe)
-            }
+        // Each hub uses ONLY its own data source — zero commingling
+        guard hubIsConnected else {
+            chartData = []
+            isLoadingChart = false
+            return
         }
+        isLoadingChart = true
+        chartData = await stockService.fetchChartDataForHub(portfolio.activeHub, symbol: selectedSymbol, timeframe: timeframe)
         isLoadingChart = false
     }
 
@@ -551,6 +553,33 @@ struct TradingDashboardView: View {
         if v >= 1_000_000 { return String(format: "%.1fM", Double(v) / 1e6) }
         if v >= 1_000 { return String(format: "%.0fK", Double(v) / 1e3) }
         return "\(v)"
+    }
+
+    // MARK: - Not Connected View
+    private var notConnectedView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            Image(systemName: portfolio.activeHub == .equities ? "key.fill" : "bolt.horizontal.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(portfolio.activeHub.accentColor.opacity(0.5))
+            Text(portfolio.activeHub == .equities ? "Connect Alpaca" : "Connect NinjaTrader")
+                .font(.title2.bold())
+            Text(portfolio.activeHub == .equities
+                 ? "Enter your Alpaca API keys in Settings to view charts and trade."
+                 : "Enter your NinjaTrader credentials in Settings to start trading futures.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            HStack(spacing: 8) {
+                Image(systemName: "slider.horizontal.3")
+                Text("Go to Settings")
+            }
+            .font(.subheadline.bold())
+            .foregroundStyle(portfolio.activeHub.accentColor)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Expand Button

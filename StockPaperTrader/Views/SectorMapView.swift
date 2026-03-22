@@ -129,7 +129,7 @@ struct SectorMapView: View {
     private func loadSectors() async {
         isLoading = true
         let etfSymbols = sectorETFs.map(\.1)
-        await stockService.fetchQuotes(for: etfSymbols)
+        await stockService.fetchQuotesForHub(.paper, symbols: etfSymbols)
         sectorData = sectorETFs.compactMap { (sector, etf) in
             guard let q = stockService.quotes[etf] else { return nil }
             return (sector: sector, etf: etf, change: q.changePercent)

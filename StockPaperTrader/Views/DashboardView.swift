@@ -73,7 +73,7 @@ struct DashboardView: View {
             }
             .navigationTitle(portfolio.activeHub.rawValue)
             .refreshable {
-                await stockService.refreshAll()
+                await stockService.refreshHub(portfolio.activeHub)
             }
         }
     }
@@ -135,7 +135,10 @@ struct DashboardView: View {
             .background(.green.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
 
             if stockService.quotes.count >= 3 {
-                topMoversSection
+                let hubQuotes = stockService.hubFilteredQuotes(portfolio.activeHub)
+                if hubQuotes.count >= 2 {
+                    topMoversSection
+                }
             }
 
             if portfolio.portfolioHistory.count >= 2 {
@@ -174,7 +177,10 @@ struct DashboardView: View {
             alpacaFeaturesCard
 
             if stockService.quotes.count >= 3 {
-                topMoversSection
+                let hubQuotes = stockService.hubFilteredQuotes(portfolio.activeHub)
+                if hubQuotes.count >= 2 {
+                    topMoversSection
+                }
             }
 
             if portfolio.portfolioHistory.count >= 2 {
@@ -565,13 +571,14 @@ struct DashboardView: View {
 
     // MARK: - Top Movers
     private var topMoversSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let hubQuotes = stockService.hubFilteredQuotes(portfolio.activeHub)
+        return VStack(alignment: .leading, spacing: 8) {
             Text("Top Movers").font(.headline)
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Gainers", systemImage: "arrow.up.right")
                         .font(.caption.bold()).foregroundStyle(.green)
-                    ForEach(portfolio.topGainers(quotes: stockService.quotes)) { q in
+                    ForEach(portfolio.topGainers(quotes: hubQuotes)) { q in
                         HStack {
                             Text(q.symbol).font(.caption.bold())
                             Spacer()
@@ -585,7 +592,7 @@ struct DashboardView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Losers", systemImage: "arrow.down.right")
                         .font(.caption.bold()).foregroundStyle(.red)
-                    ForEach(portfolio.topLosers(quotes: stockService.quotes)) { q in
+                    ForEach(portfolio.topLosers(quotes: hubQuotes)) { q in
                         HStack {
                             Text(q.symbol).font(.caption.bold())
                             Spacer()

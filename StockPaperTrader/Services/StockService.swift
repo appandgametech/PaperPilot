@@ -101,6 +101,12 @@ class StockService: ObservableObject {
         case .futures: return futuresSymbols
         }
     }
+
+    // Hub-filtered quotes — only quotes for symbols in this hub's watchlist
+    func hubFilteredQuotes(_ hub: TradingHub) -> [String: StockQuote] {
+        let symbols = Set(watchlistForHub(hub))
+        return quotes.filter { symbols.contains($0.key) }
+    }
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var searchResults: [StockQuote] = []
@@ -417,6 +423,39 @@ class StockService: ObservableObject {
         saveSettings()
     }
 
+    // MARK: - Hub-Aware Quote Fetching
+    func fetchQuotesForHub(_ hub: TradingHub, symbols: [String]) async {
+        guard !symbols.isEmpty, isConnected else { return }
+        isLoading = true
+        errorMessage = nil
+        switch hub {
+        case .paper:
+            await fetchFromYahoo(symbols: symbols)
+        case .equities:
+            if !alpacaApiKey.isEmpty, !alpacaSecretKey.isEmpty {
+                await fetchFromAlpaca(symbols: symbols)
+            }
+            // No fallback — if no keys, no data
+        case .futures:
+            // Futures uses Yahoo for market data (Tradovate is order-execution only)
+            await fetchFromYahoo(symbols: symbols)
+        }
+        isLoading = false
+    }
+
+    // MARK: - Hub-Aware Chart Fetching
+    func fetchChartDataForHub(_ hub: TradingHub, symbol: String, timeframe: ChartTimeframe) async -> [ChartDataPoint] {
+        switch hub {
+        case .paper:
+            return await fetchChartData(symbol: symbol, timeframe: timeframe)
+        case .equities:
+            guard !alpacaApiKey.isEmpty, !alpacaSecretKey.isEmpty else { return [] }
+            return await fetchAlpacaBars(symbol: symbol, timeframe: timeframe)
+        case .futures:
+            return await fetchChartData(symbol: symbol, timeframe: timeframe)
+        }
+    }
+
     // MARK: - Auto Refresh
     func refreshAll() async {
         // Fetch quotes for all watchlists + futures symbols
@@ -424,6 +463,11 @@ class StockService: ObservableObject {
         allSymbols.formUnion(alpacaWatchlist)
         allSymbols.formUnion(futuresSymbols)
         await fetchQuotes(for: Array(allSymbols))
+    }
+
+    func refreshHub(_ hub: TradingHub) async {
+        let symbols = watchlistForHub(hub)
+        await fetchQuotesForHub(hub, symbols: symbols)
     }
 
     func startAutoRefresh() {

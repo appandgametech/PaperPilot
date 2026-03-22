@@ -302,7 +302,7 @@ struct TradeEntrySheet: View {
                         .onChange(of: symbol) { _, newValue in
                             let upper = newValue.uppercased()
                             if stockService.quotes[upper] == nil && upper.count >= 1 {
-                                Task { await stockService.fetchQuotes(for: [upper]) }
+                                Task { await stockService.fetchQuotesForHub(portfolio.activeHub, symbols: [upper]) }
                             }
                         }
 

@@ -229,11 +229,11 @@ struct ComparisonView: View {
 
     private func loadCharts() async {
         isLoading = true
-        await stockService.fetchQuotes(for: symbols)
+        await stockService.fetchQuotesForHub(.paper, symbols: symbols)
         await withTaskGroup(of: (String, [ChartDataPoint]).self) { group in
             for sym in symbols {
                 group.addTask { [stockService, timeframe] in
-                    let data = await stockService.fetchChartData(symbol: sym, timeframe: timeframe)
+                    let data = await stockService.fetchChartDataForHub(.paper, symbol: sym, timeframe: timeframe)
                     return (sym, data)
                 }
             }

@@ -99,7 +99,7 @@ struct WatchlistView: View {
                         Image(systemName: "plus.circle.fill")
                     }
                     Button {
-                        Task { await stockService.refreshAll() }
+                        Task { await stockService.refreshHub(portfolio.activeHub) }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -159,7 +159,7 @@ struct WatchlistView: View {
         .listStyle(.plain)
         .environment(\.editMode, .constant(isEditing ? .active : .inactive))
         .refreshable {
-            await stockService.refreshAll()
+            await stockService.refreshHub(portfolio.activeHub)
         }
     }
 
