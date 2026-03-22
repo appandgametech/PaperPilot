@@ -27,45 +27,47 @@ struct TradingDashboardView: View {
 
     var body: some View {
         NavigationStack {
-            if !hubIsConnected {
-                notConnectedView
-            } else {
-            ScrollView {
-                VStack(spacing: 12) {
-                    // Symbol picker
-                    symbolBar
+            Group {
+                if !hubIsConnected {
+                    notConnectedView
+                } else {
+                    ScrollView {
+                        VStack(spacing: 12) {
+                            // Symbol picker
+                            symbolBar
 
-                    // Price header
-                    if let q = quote {
-                        priceHeader(q)
-                    }
+                            // Price header
+                            if let q = quote {
+                                priceHeader(q)
+                            }
 
-                    // Timeframe + chart style
-                    controlBar
+                            // Timeframe + chart style
+                            controlBar
 
-                    // Widgets — adaptive layout
-                    let activeWidgets = DashboardWidget.allCases.filter { enabledWidgets.contains($0) }
-                    if isWide {
-                        // iPad: price chart full width, then 2-col grid for the rest
-                        if activeWidgets.contains(.priceChart) {
-                            widgetView(.priceChart)
-                        }
-                        let remaining = activeWidgets.filter { $0 != .priceChart }
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                            ForEach(remaining) { widget in
-                                widgetView(widget)
+                            // Widgets — adaptive layout
+                            let activeWidgets = DashboardWidget.allCases.filter { enabledWidgets.contains($0) }
+                            if isWide {
+                                // iPad: price chart full width, then 2-col grid for the rest
+                                if activeWidgets.contains(.priceChart) {
+                                    widgetView(.priceChart)
+                                }
+                                let remaining = activeWidgets.filter { $0 != .priceChart }
+                                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                                    ForEach(remaining) { widget in
+                                        widgetView(widget)
+                                    }
+                                }
+                            } else {
+                                ForEach(activeWidgets) { widget in
+                                    widgetView(widget)
+                                }
                             }
                         }
-                    } else {
-                        ForEach(activeWidgets) { widget in
-                            widgetView(widget)
-                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 20)
                     }
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 20)
             }
-            } // end else
             .navigationTitle("\(portfolio.activeHub.rawValue) Charts")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -116,8 +118,8 @@ struct TradingDashboardView: View {
                 }
                 await loadChart()
             }
-            .onChange(of: timeframe) { _, _ in Task { await loadChart() } }
-            .onChange(of: selectedSymbol) { _, _ in Task { await loadChart() } }
+            .onChange(of: timeframe) { _, _ in Task { @MainActor in await loadChart() } }
+            .onChange(of: selectedSymbol) { _, _ in Task { @MainActor in await loadChart() } }
         }
     }
 
