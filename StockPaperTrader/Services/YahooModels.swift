@@ -156,3 +156,28 @@ struct NTPosition: Codable {
     let bought: Int?
     let sold: Int?
 }
+
+
+// MARK: - Alpaca Bars Response (for chart data)
+
+struct AlpacaBarsResponse: Codable {
+    let bars: [AlpacaBarData]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.bars = (try? container.decode([AlpacaBarData].self, forKey: .bars)) ?? []
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case bars
+    }
+}
+
+struct AlpacaBarData: Codable {
+    let t: String  // timestamp ISO8601
+    let o: Double  // open
+    let h: Double  // high
+    let l: Double  // low
+    let c: Double  // close
+    let v: Int     // volume
+}

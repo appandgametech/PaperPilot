@@ -47,7 +47,7 @@ struct AutomationView: View {
                 default: EmptyView()
                 }
             }
-            .navigationTitle("Automate")
+            .navigationTitle("\(portfolio.activeHub.rawValue) Automate")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showInfo = true } label: {

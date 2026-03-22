@@ -62,7 +62,7 @@ struct TradingDashboardView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 20)
             }
-            .navigationTitle("Trading")
+            .navigationTitle("\(portfolio.activeHub.rawValue) Charts")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showChartInfo = true } label: {
@@ -105,9 +105,25 @@ struct TradingDashboardView: View {
                 )
             }
             #endif
-            .task { await loadChart() }
+            .task {
+                // Set default symbol based on hub
+                if portfolio.activeHub == .futures && !stockService.futuresSymbols.contains(selectedSymbol) {
+                    selectedSymbol = stockService.futuresSymbols.first ?? "ES=F"
+                }
+                await loadChart()
+            }
             .onChange(of: timeframe) { _, _ in Task { await loadChart() } }
             .onChange(of: selectedSymbol) { _, _ in Task { await loadChart() } }
+        }
+    }
+
+    // Hub-specific default symbols
+    private var hubSymbols: [String] {
+        switch portfolio.activeHub {
+        case .paper, .equities:
+            return stockService.watchlist
+        case .futures:
+            return stockService.futuresSymbols
         }
     }
 
@@ -115,7 +131,7 @@ struct TradingDashboardView: View {
     private var symbolBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(stockService.watchlist, id: \.self) { sym in
+                ForEach(hubSymbols, id: \.self) { sym in
                     Button {
                         selectedSymbol = sym
                     } label: {
@@ -131,12 +147,12 @@ struct TradingDashboardView: View {
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(
-                            selectedSymbol == sym ? Color.blue.opacity(0.15) : Color.secondary.opacity(0.08),
+                            selectedSymbol == sym ? portfolio.activeHub.accentColor.opacity(0.15) : Color.secondary.opacity(0.08),
                             in: RoundedRectangle(cornerRadius: 8)
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(selectedSymbol == sym ? Color.blue : Color.clear, lineWidth: 1.5)
+                                .stroke(selectedSymbol == sym ? portfolio.activeHub.accentColor : Color.clear, lineWidth: 1.5)
                         )
                     }
                     .buttonStyle(.plain)
@@ -181,7 +197,7 @@ struct TradingDashboardView: View {
                         .font(.caption2.bold())
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(timeframe == tf ? Color.blue : Color.secondary.opacity(0.12), in: Capsule())
+                        .background(timeframe == tf ? portfolio.activeHub.accentColor : Color.secondary.opacity(0.12), in: Capsule())
                         .foregroundStyle(timeframe == tf ? .white : .secondary)
                 }
                 .buttonStyle(.plain)
@@ -199,7 +215,19 @@ struct TradingDashboardView: View {
 
     private func loadChart() async {
         isLoadingChart = true
-        chartData = await stockService.fetchChartData(symbol: selectedSymbol, timeframe: timeframe)
+        switch portfolio.activeHub {
+        case .paper, .futures:
+            chartData = await stockService.fetchChartData(symbol: selectedSymbol, timeframe: timeframe)
+        case .equities:
+            if !stockService.alpacaApiKey.isEmpty {
+                chartData = await stockService.fetchAlpacaBars(symbol: selectedSymbol, timeframe: timeframe)
+                if chartData.isEmpty {
+                    chartData = await stockService.fetchChartData(symbol: selectedSymbol, timeframe: timeframe)
+                }
+            } else {
+                chartData = await stockService.fetchChartData(symbol: selectedSymbol, timeframe: timeframe)
+            }
+        }
         isLoadingChart = false
     }
 

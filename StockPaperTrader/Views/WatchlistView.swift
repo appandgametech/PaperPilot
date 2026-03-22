@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WatchlistView: View {
     @EnvironmentObject var stockService: StockService
+    @EnvironmentObject var portfolio: PortfolioManager
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var showingSearch = false
     @State private var sortBy: WatchlistSort? = nil
@@ -11,6 +12,11 @@ struct WatchlistView: View {
 
     private var isWide: Bool { sizeClass == .regular }
 
+    // Hub-specific watchlist
+    private var hubWatchlist: [String] {
+        stockService.watchlistForHub(portfolio.activeHub)
+    }
+
     enum WatchlistMode: String, CaseIterable {
         case list = "List"
         case heatmap = "Heatmap"
@@ -18,9 +24,9 @@ struct WatchlistView: View {
 
     private var displaySymbols: [String] {
         guard let sortBy else {
-            return stockService.watchlist
+            return hubWatchlist
         }
-        return stockService.watchlist.sorted { a, b in
+        return hubWatchlist.sorted { a, b in
             let qa = stockService.quotes[a]
             let qb = stockService.quotes[b]
             switch sortBy {
@@ -73,7 +79,7 @@ struct WatchlistView: View {
                     heatmapView
                 }
             }
-            .navigationTitle("Markets")
+            .navigationTitle("\(portfolio.activeHub.rawValue) Markets")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showInfo = true } label: {
@@ -144,10 +150,10 @@ struct WatchlistView: View {
             }
             .onDelete { offsets in
                 let symbols = offsets.map { displaySymbols[$0] }
-                symbols.forEach { stockService.removeFromWatchlist($0) }
+                symbols.forEach { stockService.removeFromWatchlist($0, hub: portfolio.activeHub) }
             }
             .onMove { from, to in
-                stockService.moveWatchlistItem(from: from, to: to)
+                stockService.moveWatchlistItem(from: from, to: to, hub: portfolio.activeHub)
             }
         }
         .listStyle(.plain)
@@ -341,9 +347,14 @@ struct SparklineView: View {
 
 struct SearchStockSheet: View {
     @EnvironmentObject var stockService: StockService
+    @EnvironmentObject var portfolio: PortfolioManager
     @Environment(\.dismiss) var dismiss
     @State private var query = ""
     @State private var results: [StockQuote] = []
+
+    private var currentWatchlist: [String] {
+        stockService.watchlistForHub(portfolio.activeHub)
+    }
 
     var body: some View {
         NavigationStack {
@@ -354,7 +365,7 @@ struct SearchStockSheet: View {
                 }
                 ForEach(results) { result in
                     Button {
-                        stockService.addToWatchlist(result.symbol)
+                        stockService.addToWatchlist(result.symbol, hub: portfolio.activeHub)
                         dismiss()
                     } label: {
                         HStack {
@@ -363,7 +374,7 @@ struct SearchStockSheet: View {
                                 Text(result.name).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            if stockService.watchlist.contains(result.symbol) {
+                            if currentWatchlist.contains(result.symbol) {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(.green)
                             } else {

@@ -115,7 +115,7 @@ struct AnalyticsView: View {
             }
             .padding()
         }
-        .navigationTitle("Analytics")
+        .navigationTitle("\(portfolio.activeHub.rawValue) Analytics")
     }
 
     private var performanceCard: some View {

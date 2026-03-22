@@ -29,6 +29,31 @@ struct TradeView: View {
     var body: some View {
         NavigationStack {
             List {
+                // Hub identity banner
+                Section {
+                    HStack(spacing: 10) {
+                        Image(systemName: portfolio.activeHub.icon)
+                            .font(.title3)
+                            .foregroundStyle(portfolio.activeHub.accentColor)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(portfolio.activeHub.broker)
+                                .font(.caption.bold())
+                            Text(portfolio.isLiveTrading ? "Live Trading — Real Money" : portfolio.activeHub == .paper ? "Simulated Trading" : "Paper Mode")
+                                .font(.caption2)
+                                .foregroundStyle(portfolio.isLiveTrading ? .red : .secondary)
+                        }
+                        Spacer()
+                        if portfolio.isLiveTrading {
+                            Text("LIVE")
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(.red, in: Capsule())
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
+
                 Section {
                     HStack {
                         Text("Cash Available")
@@ -126,7 +151,7 @@ struct TradeView: View {
                     }
                 }
             }
-            .navigationTitle("Trade")
+            .navigationTitle("\(portfolio.activeHub.rawValue) Trade")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     HStack(spacing: 12) {

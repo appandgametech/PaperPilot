@@ -90,7 +90,7 @@ struct ContentView: View {
                 regularLayout
             }
         }
-        .tint(portfolio.accentTheme.color)
+        .tint(portfolio.activeHub.accentColor)
         .preferredColorScheme(portfolio.appearanceMode.colorScheme)
         .onReceive(stockService.$quotes) { quotes in
             portfolio.updatePositionPrices(quotes: quotes)

@@ -88,6 +88,19 @@ actor YahooRateLimiter {
 class StockService: ObservableObject {
     @Published var quotes: [String: StockQuote] = [:]
     @Published var watchlist: [String] = ["AAPL", "GOOGL", "MSFT", "AMZN", "TSLA", "NVDA", "META", "SPY"]
+    @Published var alpacaWatchlist: [String] = ["AAPL", "GOOGL", "MSFT", "AMZN", "TSLA", "NVDA", "META", "SPY"]
+
+    // Futures symbols — fixed contract list for NinjaTrader hub
+    let futuresSymbols: [String] = ["ES=F", "NQ=F", "CL=F", "GC=F", "SI=F", "ZB=F", "YM=F", "RTY=F"]
+
+    // Hub-aware watchlist accessor
+    func watchlistForHub(_ hub: TradingHub) -> [String] {
+        switch hub {
+        case .paper: return watchlist
+        case .equities: return alpacaWatchlist
+        case .futures: return futuresSymbols
+        }
+    }
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var searchResults: [StockQuote] = []
@@ -362,29 +375,55 @@ class StockService: ObservableObject {
         }
     }
 
-    // MARK: - Watchlist
-    func addToWatchlist(_ symbol: String) {
+    // MARK: - Watchlist (hub-aware)
+    func addToWatchlist(_ symbol: String, hub: TradingHub = .paper) {
         let upper = symbol.uppercased()
-        guard !watchlist.contains(upper) else { return }
-        watchlist.append(upper)
+        switch hub {
+        case .paper:
+            guard !watchlist.contains(upper) else { return }
+            watchlist.append(upper)
+        case .equities:
+            guard !alpacaWatchlist.contains(upper) else { return }
+            alpacaWatchlist.append(upper)
+        case .futures:
+            return // Futures has fixed symbols
+        }
         Task { await fetchQuotes(for: [upper]) }
         saveSettings()
     }
 
-    func removeFromWatchlist(_ symbol: String) {
-        watchlist.removeAll { $0 == symbol }
+    func removeFromWatchlist(_ symbol: String, hub: TradingHub = .paper) {
+        switch hub {
+        case .paper:
+            watchlist.removeAll { $0 == symbol }
+        case .equities:
+            alpacaWatchlist.removeAll { $0 == symbol }
+        case .futures:
+            return // Futures has fixed symbols
+        }
         quotes.removeValue(forKey: symbol)
         saveSettings()
     }
 
-    func moveWatchlistItem(from source: IndexSet, to destination: Int) {
-        watchlist.move(fromOffsets: source, toOffset: destination)
+    func moveWatchlistItem(from source: IndexSet, to destination: Int, hub: TradingHub = .paper) {
+        switch hub {
+        case .paper:
+            watchlist.move(fromOffsets: source, toOffset: destination)
+        case .equities:
+            alpacaWatchlist.move(fromOffsets: source, toOffset: destination)
+        case .futures:
+            return
+        }
         saveSettings()
     }
 
     // MARK: - Auto Refresh
     func refreshAll() async {
-        await fetchQuotes(for: watchlist)
+        // Fetch quotes for all watchlists + futures symbols
+        var allSymbols = Set(watchlist)
+        allSymbols.formUnion(alpacaWatchlist)
+        allSymbols.formUnion(futuresSymbols)
+        await fetchQuotes(for: Array(allSymbols))
     }
 
     func startAutoRefresh() {
@@ -417,6 +456,7 @@ class StockService: ObservableObject {
     // MARK: - Persistence (credentials in Keychain)
     private func saveSettings() {
         UserDefaults.standard.set(watchlist, forKey: "watchlist")
+        UserDefaults.standard.set(alpacaWatchlist, forKey: "alpacaWatchlist")
         UserDefaults.standard.set(dataProvider.rawValue, forKey: "dataProvider")
         UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval")
         KeychainHelper.save(key: "alpacaApiKey", value: alpacaApiKey)
@@ -431,6 +471,9 @@ class StockService: ObservableObject {
     private func loadSettings() {
         if let saved = UserDefaults.standard.stringArray(forKey: "watchlist"), !saved.isEmpty {
             watchlist = saved
+        }
+        if let saved = UserDefaults.standard.stringArray(forKey: "alpacaWatchlist"), !saved.isEmpty {
+            alpacaWatchlist = saved
         }
         if let dp = UserDefaults.standard.string(forKey: "dataProvider"),
            let provider = DataProvider(rawValue: dp) {
@@ -461,6 +504,64 @@ class StockService: ObservableObject {
     @Published var ntCid: String = ""       // Client ID from NinjaTrader partner app
     @Published var ntSecret: String = ""    // API secret
     @Published var ntEnvironment: NTEnvironment = .demo
+
+    // MARK: - Alpaca Bars API (for Alpaca hub charts)
+    func fetchAlpacaBars(symbol: String, timeframe: ChartTimeframe) async -> [ChartDataPoint] {
+        guard !alpacaApiKey.isEmpty, !alpacaSecretKey.isEmpty else { return [] }
+
+        let tf: String
+        let start: String
+        let cal = Calendar.current
+        let now = Date()
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime]
+
+        switch timeframe {
+        case .oneDay:
+            tf = "5Min"
+            start = fmt.string(from: cal.date(byAdding: .day, value: -1, to: now) ?? now)
+        case .fiveDay:
+            tf = "15Min"
+            start = fmt.string(from: cal.date(byAdding: .day, value: -5, to: now) ?? now)
+        case .oneMonth:
+            tf = "1Hour"
+            start = fmt.string(from: cal.date(byAdding: .month, value: -1, to: now) ?? now)
+        case .threeMonth:
+            tf = "1Day"
+            start = fmt.string(from: cal.date(byAdding: .month, value: -3, to: now) ?? now)
+        case .sixMonth:
+            tf = "1Day"
+            start = fmt.string(from: cal.date(byAdding: .month, value: -6, to: now) ?? now)
+        case .oneYear:
+            tf = "1Day"
+            start = fmt.string(from: cal.date(byAdding: .year, value: -1, to: now) ?? now)
+        }
+
+        let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? symbol
+        guard let url = URL(string: "https://data.alpaca.markets/v2/stocks/\(encoded)/bars?timeframe=\(tf)&start=\(start)&limit=500&feed=iex") else { return [] }
+
+        var request = URLRequest(url: url)
+        request.setValue(alpacaApiKey, forHTTPHeaderField: "APCA-API-KEY-ID")
+        request.setValue(alpacaSecretKey, forHTTPHeaderField: "APCA-API-SECRET-KEY")
+        request.timeoutInterval = 12
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return [] }
+
+            let decoded = try JSONDecoder().decode(AlpacaBarsResponse.self, from: data)
+            return decoded.bars.compactMap { bar in
+                guard let date = ISO8601DateFormatter().date(from: bar.t) else { return nil }
+                return ChartDataPoint(
+                    date: date,
+                    open: bar.o, high: bar.h, low: bar.l, close: bar.c,
+                    volume: Int64(bar.v)
+                )
+            }
+        } catch {
+            return []
+        }
+    }
 
     // MARK: - Chart Data Fetching
     func fetchChartData(symbol: String, timeframe: ChartTimeframe) async -> [ChartDataPoint] {

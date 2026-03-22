@@ -110,7 +110,7 @@ struct ToolsView: View {
                     }
                 }
             }
-            .navigationTitle("Tools")
+            .navigationTitle("\(portfolio.activeHub.rawValue) Tools")
         }
     }
 }
