@@ -20,11 +20,11 @@ struct OnboardingView: View {
     ]
 
     private let pages: [(icon: String, title: String, subtitle: String, color: Color)] = [
-        ("chart.line.uptrend.xyaxis", "Welcome to PaperPilot", "Practice trading stocks risk-free with real market data. No real money, no risk — just pure learning.", .blue),
+        ("airplane", "Welcome to PaperPilot", "3 trading apps in 1 platform. Practice with simulations, trade live with Alpaca, or explore futures with NinjaTrader.", .blue),
+        ("square.stack.3d.up", "3 Isolated Apps", "Paper (Yahoo simulation), Equities (Alpaca broker), and Futures (NinjaTrader). Each has its own portfolio, watchlist, and settings — zero data mixing.", .purple),
         ("arrow.left.arrow.right.circle", "Place Real Trades", "Market, limit, stop loss, and stop limit orders. Dollar-based investing. Trade journal to track your reasoning.", .green),
-        ("chart.xyaxis.line", "Pro-Level Charts", "Candlestick charts, RSI, MACD, Bollinger Bands, moving averages, volume — all the tools the pros use.", .purple),
-        ("gearshape.2", "Automate Your Strategy", "Build rules like Stop Loss, Take Profit, and Buy the Dip. The engine watches prices 24/7 and executes for you.", .orange),
-        ("chart.pie", "Track Everything", "Win rate, P&L history, allocation breakdown, top movers, CSV export — know exactly how you're performing.", .cyan),
+        ("chart.xyaxis.line", "Pro-Level Charts", "Candlestick charts, RSI, MACD, Bollinger Bands, moving averages, volume — all the tools the pros use.", .cyan),
+        ("gearshape.2", "Automate Your Strategy", "Build rules like Stop Loss, Take Profit, and Buy the Dip. The engine watches prices and executes for you.", .orange),
     ]
 
     private var totalPages: Int { pages.count + 2 }

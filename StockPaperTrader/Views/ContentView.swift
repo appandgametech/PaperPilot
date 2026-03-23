@@ -71,20 +71,29 @@ enum FuturesTab: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Content View
 struct ContentView: View {
     @EnvironmentObject var portfolio: PortfolioManager
     @EnvironmentObject var stockService: StockService
     @EnvironmentObject var automationEngine: AutomationEngine
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showOnboarding = false
-    @State private var showHubLauncher = false
+    @State private var showLauncher = false
     @State private var paperTab: PaperTab = .home
     @State private var alpacaTab: AlpacaTab = .home
     @State private var futuresTab: FuturesTab = .home
 
     var body: some View {
         Group {
-            if horizontalSizeClass == .compact {
+            if showLauncher {
+                AppLauncherView {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                        showLauncher = false
+                        portfolio.hasSelectedInitialHub = true
+                        portfolio.saveUserPreferences()
+                    }
+                }
+            } else if horizontalSizeClass == .compact {
                 compactLayout
             } else {
                 regularLayout
@@ -102,6 +111,8 @@ struct ContentView: View {
             requestNotificationPermission()
             if !portfolio.hasCompletedOnboarding {
                 showOnboarding = true
+            } else if !portfolio.hasSelectedInitialHub {
+                showLauncher = true
             }
         }
         .sheet(isPresented: $showOnboarding) {
@@ -110,10 +121,9 @@ struct ContentView: View {
                 portfolio.hasCompletedOnboarding = true
                 portfolio.saveUserPreferences()
                 showOnboarding = false
+                // After onboarding, show the launcher
+                showLauncher = true
             }
-        }
-        .sheet(isPresented: $showHubLauncher) {
-            HubLauncherView()
         }
     }
 
@@ -409,68 +419,218 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Hub Launcher View
-struct HubLauncherView: View {
+// MARK: - App Launcher View (First Launch Home Screen)
+struct AppLauncherView: View {
     @EnvironmentObject var portfolio: PortfolioManager
-    @Environment(\.dismiss) var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    let onSelectHub: () -> Void
+
+    private var isWide: Bool { sizeClass == .regular }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
-                Text("Choose Your Trading Hub")
-                    .font(.title2.bold())
-                    .padding(.top, 20)
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: isWide ? 32 : 24) {
+                // Header
+                VStack(spacing: 8) {
+                    Image(systemName: "airplane")
+                        .font(.system(size: isWide ? 52 : 44))
+                        .foregroundStyle(.blue)
+                        .symbolEffect(.bounce, value: true)
 
-                ForEach(portfolio.visibleHubs) { hub in
-                    Button {
-                        portfolio.activeHub = hub
-                        portfolio.saveUserPreferences()
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 16) {
-                            Image(systemName: hub.icon)
-                                .font(.title2)
-                                .foregroundStyle(hub.accentColor)
-                                .frame(width: 48, height: 48)
-                                .background(hub.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(hub.rawValue)
-                                    .font(.headline)
-                                Text(hub.subtitle)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text(hub.broker)
-                                    .font(.caption2)
-                                    .foregroundStyle(hub.accentColor)
-                            }
-                            Spacer()
-                            if portfolio.activeHub == hub {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(hub.accentColor)
-                            }
-                            Image(systemName: "chevron.right")
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding()
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(portfolio.activeHub == hub ? hub.accentColor.opacity(0.3) : .clear, lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    Text("PaperPilot")
+                        .font(isWide ? .largeTitle.bold() : .title.bold())
+
+                    Text("3 Trading Apps. 1 Platform.")
+                        .font(isWide ? .title3 : .headline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, isWide ? 40 : 28)
+
+                // Why 3 apps explanation
+                VStack(spacing: 6) {
+                    Text("Choose your integration, platform, and automation level. Each app is fully isolated with its own portfolio, watchlist, and settings — so you can practice, trade live, or explore futures without any data mixing.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, isWide ? 80 : 24)
                 }
 
-                Spacer()
-            }
-            .padding()
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                // App Cards
+                VStack(spacing: isWide ? 20 : 16) {
+                    appCard(
+                        hub: .paper,
+                        tagline: "Risk-Free Simulation",
+                        purpose: "Practice trading with virtual money using real market data. No account needed — just learn, experiment, and build confidence.",
+                        tradingMode: "Simulation Only",
+                        tradingModeIcon: "shield.checkered",
+                        integration: "Yahoo Finance",
+                        integrationDetail: "Real-time quotes, charts, news, sector data",
+                        features: [
+                            ("doc.text", "Full sandbox with $10K–$1M virtual cash"),
+                            ("chart.xyaxis.line", "Candlestick charts with RSI, MACD, Bollinger"),
+                            ("gearshape.2", "Automation engine: stop loss, take profit, buy the dip"),
+                            ("wrench.and.screwdriver", "Tools: screener, comparison, risk calculator, sector map"),
+                            ("list.bullet.rectangle", "Watchlist, price alerts, trade journal"),
+                        ],
+                        tabCount: 8
+                    )
+
+                    appCard(
+                        hub: .equities,
+                        tagline: "Real Brokerage Trading",
+                        purpose: "Connect your Alpaca account to trade stocks, options, and crypto with real or paper money through a regulated broker.",
+                        tradingMode: "Paper & Live Trading",
+                        tradingModeIcon: "arrow.left.arrow.right.circle",
+                        integration: "Alpaca Markets API",
+                        integrationDetail: "Equities, options, crypto, fractional shares",
+                        features: [
+                            ("chart.line.uptrend.xyaxis", "Alpaca Bars API for real brokerage charts"),
+                            ("lock.shield", "Paper mode for practice, live mode for real trades"),
+                            ("dollarsign.circle", "Fractional shares and dollar-based investing"),
+                            ("gearshape.2", "Automation with live execution through Alpaca"),
+                            ("bell", "Real-time order fills and portfolio sync"),
+                        ],
+                        tabCount: 7
+                    )
+
+                    appCard(
+                        hub: .futures,
+                        tagline: "Futures & Commodities",
+                        purpose: "Trade futures contracts through NinjaTrader and Tradovate. Access ES, NQ, crude oil, gold, and more.",
+                        tradingMode: "Demo & Live Trading",
+                        tradingModeIcon: "bolt.horizontal.circle",
+                        integration: "NinjaTrader / Tradovate API",
+                        integrationDetail: "Futures execution, Yahoo for market data",
+                        features: [
+                            ("bolt.horizontal.fill", "Futures: ES, NQ, CL, GC, and more"),
+                            ("chart.xyaxis.line", "Yahoo-powered charts for futures symbols"),
+                            ("gearshape.2", "Automation rules for futures strategies"),
+                            ("shield.checkered", "Demo mode to practice, live mode for real execution"),
+                            ("arrow.triangle.2.circlepath", "Tradovate API for order routing"),
+                        ],
+                        tabCount: 6
+                    )
                 }
+                .padding(.horizontal, isWide ? 40 : 16)
+
+                // Footer
+                VStack(spacing: 4) {
+                    Text("You can switch between apps anytime using the hub bar.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Each app keeps its own data — nothing is shared.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom, isWide ? 40 : 28)
             }
         }
+        .background(Color(.systemGroupedBackground))
+    }
+
+    // MARK: - App Card
+    private func appCard(
+        hub: TradingHub,
+        tagline: String,
+        purpose: String,
+        tradingMode: String,
+        tradingModeIcon: String,
+        integration: String,
+        integrationDetail: String,
+        features: [(icon: String, text: String)],
+        tabCount: Int
+    ) -> some View {
+        Button {
+            portfolio.activeHub = hub
+            portfolio.saveUserPreferences()
+            HapticManager.tradeFeedback()
+            onSelectHub()
+        } label: {
+            VStack(alignment: .leading, spacing: 14) {
+                // Top row: icon + name + tagline
+                HStack(spacing: 12) {
+                    Image(systemName: hub.icon)
+                        .font(.title2)
+                        .foregroundStyle(.white)
+                        .frame(width: 48, height: 48)
+                        .background(hub.accentColor.gradient, in: RoundedRectangle(cornerRadius: 12))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(hub.rawValue)
+                            .font(.title3.bold())
+                            .foregroundStyle(.primary)
+                        Text(tagline)
+                            .font(.caption)
+                            .foregroundStyle(hub.accentColor)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(hub.accentColor)
+                }
+
+                // Purpose
+                Text(purpose)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // Trading mode + Integration badges
+                HStack(spacing: 8) {
+                    Label(tradingMode, systemImage: tradingModeIcon)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(hub.accentColor.opacity(0.12), in: Capsule())
+                        .foregroundStyle(hub.accentColor)
+
+                    Label(integration, systemImage: "link")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.secondary.opacity(0.1), in: Capsule())
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(integrationDetail)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+
+                // Feature list
+                Divider()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(features, id: \.text) { feature in
+                        HStack(spacing: 8) {
+                            Image(systemName: feature.icon)
+                                .font(.caption)
+                                .foregroundStyle(hub.accentColor)
+                                .frame(width: 18)
+                            Text(feature.text)
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                }
+
+                // Tab count
+                HStack {
+                    Spacer()
+                    Text("\(tabCount) tabs")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(16)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(hub.accentColor.opacity(0.2), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 

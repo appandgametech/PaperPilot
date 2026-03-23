@@ -335,6 +335,7 @@ class PortfolioManager: ObservableObject {
     @Published var appearanceMode: AppearanceMode = .system
     @Published var accentTheme: AccentTheme = .blue
     @Published var hasCompletedOnboarding: Bool = false
+    @Published var hasSelectedInitialHub: Bool = false
     @Published var errorMessage: String?
     @Published var lastTradeMessage: String?
 
@@ -698,12 +699,14 @@ class PortfolioManager: ObservableObject {
         UserDefaults.standard.set(appearanceMode.rawValue, forKey: "appearanceMode")
         UserDefaults.standard.set(accentTheme.rawValue, forKey: "accentTheme")
         UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding")
+        UserDefaults.standard.set(hasSelectedInitialHub, forKey: "hasSelectedInitialHub")
         UserDefaults.standard.set(activeHub.rawValue, forKey: "activeHub")
         if let d = try? JSONEncoder().encode(enabledHubs) { UserDefaults.standard.set(d, forKey: "enabledHubs") }
     }
 
     private func loadAppPreferences() {
         hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+        hasSelectedInitialHub = UserDefaults.standard.bool(forKey: "hasSelectedInitialHub")
         if let m = UserDefaults.standard.string(forKey: "appearanceMode"),
            let mode = AppearanceMode(rawValue: m) { appearanceMode = mode }
         if let h = UserDefaults.standard.string(forKey: "activeHub"),
