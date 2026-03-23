@@ -109,6 +109,8 @@ enum RuleTemplate: String, Codable, CaseIterable {
     case buyTheDip = "Buy the Dip"
     case breakout = "Breakout"
     case meanReversion = "Mean Reversion"
+    case trailingStopRule = "Trailing Stop"
+    case timeBasedEntry = "Time-Based Entry"
 
     var description: String {
         switch self {
@@ -118,6 +120,8 @@ enum RuleTemplate: String, Codable, CaseIterable {
         case .buyTheDip: return "Buy when price drops by a percentage"
         case .breakout: return "Buy when price breaks above day high"
         case .meanReversion: return "Buy when price drops below day low"
+        case .trailingStopRule: return "Sell when price drops from high by trail amount"
+        case .timeBasedEntry: return "Buy/sell at a specific time of day"
         }
     }
 
@@ -129,6 +133,8 @@ enum RuleTemplate: String, Codable, CaseIterable {
         case .buyTheDip: return "arrow.down.to.line"
         case .breakout: return "arrow.up.forward"
         case .meanReversion: return "arrow.left.arrow.right"
+        case .trailingStopRule: return "arrow.down.right"
+        case .timeBasedEntry: return "clock"
         }
     }
 }
@@ -140,6 +146,11 @@ enum ConditionType: String, Codable, CaseIterable {
     case dayHigh = "Day High"
     case dayLow = "Day Low"
     case profitLossPercent = "Position P/L %"
+    case rsiAbove = "RSI Above"
+    case rsiBelow = "RSI Below"
+    case macdCrossUp = "MACD Cross Up"
+    case macdCrossDown = "MACD Cross Down"
+    case timeOfDay = "Time of Day"
 }
 
 enum ComparisonType: String, Codable, CaseIterable {

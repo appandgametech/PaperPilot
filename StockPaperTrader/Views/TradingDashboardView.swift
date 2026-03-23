@@ -437,7 +437,9 @@ struct TradingDashboardView: View {
                         activeDrawingTool: activeDrawingTool,
                         drawingPoint1: drawingPoint1,
                         chartTimeZone: portfolio.chartTimezone.timeZone,
-                        onChartTap: { index, price in handleChartTap(index: index, price: price) }
+                        onChartTap: { index, price in handleChartTap(index: index, price: price) },
+                        trades: portfolio.tradeHistory.filter { $0.symbol == selectedSymbol },
+                        entryPrice: portfolio.positions.first(where: { $0.symbol == selectedSymbol })?.averageCost
                     )
                     .frame(height: 280)
                 } else {
@@ -448,7 +450,9 @@ struct TradingDashboardView: View {
                         activeDrawingTool: activeDrawingTool,
                         drawingPoint1: drawingPoint1,
                         chartTimeZone: portfolio.chartTimezone.timeZone,
-                        onChartTap: { index, price in handleChartTap(index: index, price: price) }
+                        onChartTap: { index, price in handleChartTap(index: index, price: price) },
+                        trades: portfolio.tradeHistory.filter { $0.symbol == selectedSymbol },
+                        entryPrice: portfolio.positions.first(where: { $0.symbol == selectedSymbol })?.averageCost
                     )
                     .frame(height: 280)
                 }
@@ -1091,6 +1095,8 @@ struct InteractiveLineChartView: View {
     var drawingPoint1: (index: Int, price: Double)? = nil
     var chartTimeZone: TimeZone = .current
     var onChartTap: ((Int, Double) -> Void)? = nil
+    var trades: [Trade] = []
+    var entryPrice: Double? = nil
 
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
@@ -1120,6 +1126,8 @@ struct InteractiveLineChartView: View {
                         Canvas { context, size in
                             drawLineChart(context: context, size: size)
                             drawAnnotations(context: context, size: size)
+                            drawTradeMarkers(context: context, size: size)
+                            drawEntryPriceLine(context: context, size: size)
                         }
                         .contentShape(Rectangle())
                         .simultaneousGesture(tapGesture(in: geo.size))
@@ -1138,6 +1146,64 @@ struct InteractiveLineChartView: View {
                 .frame(height: ChartLayout.xAxisHeight)
                 .padding(.trailing, ChartLayout.yAxisWidth)
         }
+    }
+
+    // MARK: - Draw Trade Markers on Line Chart
+    private func drawTradeMarkers(context: GraphicsContext, size: CGSize) {
+        let vd = visibleData
+        guard vd.count >= 2, !trades.isEmpty else { return }
+        let closes = vd.map(\.close)
+        let padding: CGFloat = 8
+        let minY = (closes.min() ?? 0) * 0.999
+        let maxY = (closes.max() ?? 1) * 1.001
+        let range = maxY - minY
+        guard range > 0 else { return }
+        let chartH = size.height - padding * 2
+        let stepX = size.width / CGFloat(vd.count - 1)
+
+        for trade in trades {
+            guard let idx = vd.firstIndex(where: { abs($0.date.timeIntervalSince(trade.date)) < 300 }) else { continue }
+            let x = CGFloat(idx) * stepX
+            let y = padding + chartH - ((trade.price - minY) / range) * chartH
+            guard y >= 0, y <= size.height else { continue }
+            let isBuy = trade.type == .buy
+            let color: Color = isBuy ? .green : .red
+            var arrow = Path()
+            if isBuy {
+                arrow.move(to: CGPoint(x: x, y: y + 12))
+                arrow.addLine(to: CGPoint(x: x - 5, y: y + 20))
+                arrow.addLine(to: CGPoint(x: x + 5, y: y + 20))
+            } else {
+                arrow.move(to: CGPoint(x: x, y: y - 12))
+                arrow.addLine(to: CGPoint(x: x - 5, y: y - 20))
+                arrow.addLine(to: CGPoint(x: x + 5, y: y - 20))
+            }
+            arrow.closeSubpath()
+            context.fill(arrow, with: .color(color))
+            let label = Text(isBuy ? "B" : "S").font(.system(size: 7).bold()).foregroundColor(.white)
+            context.draw(context.resolve(label), at: CGPoint(x: x, y: isBuy ? y + 16 : y - 16), anchor: .center)
+        }
+    }
+
+    private func drawEntryPriceLine(context: GraphicsContext, size: CGSize) {
+        guard let entry = entryPrice else { return }
+        let vd = visibleData
+        guard vd.count >= 2 else { return }
+        let closes = vd.map(\.close)
+        let padding: CGFloat = 8
+        let minY = (closes.min() ?? 0) * 0.999
+        let maxY = (closes.max() ?? 1) * 1.001
+        let range = maxY - minY
+        guard range > 0 else { return }
+        let chartH = size.height - padding * 2
+        let y = padding + chartH - ((entry - minY) / range) * chartH
+        guard y >= 0, y <= size.height else { return }
+        var p = Path()
+        p.move(to: CGPoint(x: 0, y: y))
+        p.addLine(to: CGPoint(x: size.width, y: y))
+        context.stroke(p, with: .color(.cyan), style: StrokeStyle(lineWidth: 1, dash: [8, 4]))
+        let label = Text("Entry \(ChartLayout.priceFormat(entry))").font(.system(size: 8).bold()).foregroundColor(.cyan)
+        context.draw(context.resolve(label), at: CGPoint(x: size.width - 4, y: y - 8), anchor: .topTrailing)
     }
 
     // MARK: - Tap gesture for drawing tools
@@ -1509,6 +1575,8 @@ struct InteractiveCandlestickChartView: View {
     var drawingPoint1: (index: Int, price: Double)? = nil
     var chartTimeZone: TimeZone = .current
     var onChartTap: ((Int, Double) -> Void)? = nil
+    var trades: [Trade] = []
+    var entryPrice: Double? = nil
 
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
@@ -1538,6 +1606,8 @@ struct InteractiveCandlestickChartView: View {
                         Canvas { context, size in
                             drawCandlestickChart(context: context, size: size)
                             drawCandleAnnotations(context: context, size: size)
+                            drawCandleTradeMarkers(context: context, size: size)
+                            drawCandleEntryPriceLine(context: context, size: size)
                         }
                         .contentShape(Rectangle())
                         .simultaneousGesture(candleTapGesture(in: geo.size))
@@ -1556,6 +1626,64 @@ struct InteractiveCandlestickChartView: View {
                 .frame(height: ChartLayout.xAxisHeight)
                 .padding(.trailing, ChartLayout.yAxisWidth)
         }
+    }
+
+    // MARK: - Draw Trade Markers on Candlestick Chart
+    private func drawCandleTradeMarkers(context: GraphicsContext, size: CGSize) {
+        let vd = visibleData
+        guard vd.count >= 2, !trades.isEmpty else { return }
+        let allPrices = vd.flatMap { [$0.high, $0.low] }
+        let padding: CGFloat = 8
+        let minY = (allPrices.min() ?? 0) * 0.999
+        let maxY = (allPrices.max() ?? 1) * 1.001
+        let range = maxY - minY
+        guard range > 0 else { return }
+        let chartH = size.height - padding * 2
+        let stepX = size.width / CGFloat(vd.count)
+
+        for trade in trades {
+            guard let idx = vd.firstIndex(where: { abs($0.date.timeIntervalSince(trade.date)) < 300 }) else { continue }
+            let x = CGFloat(idx) * stepX + stepX / 2
+            let y = padding + chartH - ((trade.price - minY) / range) * chartH
+            guard y >= 0, y <= size.height else { continue }
+            let isBuy = trade.type == .buy
+            let color: Color = isBuy ? .green : .red
+            var arrow = Path()
+            if isBuy {
+                arrow.move(to: CGPoint(x: x, y: y + 12))
+                arrow.addLine(to: CGPoint(x: x - 5, y: y + 20))
+                arrow.addLine(to: CGPoint(x: x + 5, y: y + 20))
+            } else {
+                arrow.move(to: CGPoint(x: x, y: y - 12))
+                arrow.addLine(to: CGPoint(x: x - 5, y: y - 20))
+                arrow.addLine(to: CGPoint(x: x + 5, y: y - 20))
+            }
+            arrow.closeSubpath()
+            context.fill(arrow, with: .color(color))
+            let label = Text(isBuy ? "B" : "S").font(.system(size: 7).bold()).foregroundColor(.white)
+            context.draw(context.resolve(label), at: CGPoint(x: x, y: isBuy ? y + 16 : y - 16), anchor: .center)
+        }
+    }
+
+    private func drawCandleEntryPriceLine(context: GraphicsContext, size: CGSize) {
+        guard let entry = entryPrice else { return }
+        let vd = visibleData
+        guard vd.count >= 2 else { return }
+        let allPrices = vd.flatMap { [$0.high, $0.low] }
+        let padding: CGFloat = 8
+        let minY = (allPrices.min() ?? 0) * 0.999
+        let maxY = (allPrices.max() ?? 1) * 1.001
+        let range = maxY - minY
+        guard range > 0 else { return }
+        let chartH = size.height - padding * 2
+        let y = padding + chartH - ((entry - minY) / range) * chartH
+        guard y >= 0, y <= size.height else { return }
+        var p = Path()
+        p.move(to: CGPoint(x: 0, y: y))
+        p.addLine(to: CGPoint(x: size.width, y: y))
+        context.stroke(p, with: .color(.cyan), style: StrokeStyle(lineWidth: 1, dash: [8, 4]))
+        let label = Text("Entry \(ChartLayout.priceFormat(entry))").font(.system(size: 8).bold()).foregroundColor(.cyan)
+        context.draw(context.resolve(label), at: CGPoint(x: size.width - 4, y: y - 8), anchor: .topTrailing)
     }
 
     // MARK: - Tap gesture for drawing tools

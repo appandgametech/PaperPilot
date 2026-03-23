@@ -339,6 +339,8 @@ class PortfolioManager: ObservableObject {
     @Published var chartTimezone: ChartTimezone = .eastern
     @Published var errorMessage: String?
     @Published var lastTradeMessage: String?
+    @Published var atmStrategies: [ATMStrategy] = ATMStrategy.presets
+    @Published var defaultATMIndex: Int = 1  // Standard by default
 
     // Broker services
     private var localService = LocalPaperTradingService()
@@ -499,6 +501,7 @@ class PortfolioManager: ObservableObject {
     func evaluatePendingOrders(quotes: [String: StockQuote]) {
         let hp = activeHubPortfolio
         var ordersToFill: [(index: Int, price: Double)] = []
+        var bracketOrdersToPlace: [PendingOrder] = []
 
         for i in hp.pendingOrders.indices.reversed() {
             guard hp.pendingOrders[i].isActive else { continue }
@@ -518,24 +521,61 @@ class PortfolioManager: ObservableObject {
                 if let stop = order.stopPrice, let limit = order.limitPrice, quote.price <= stop {
                     shouldFill = order.side == .sell ? quote.price >= limit : quote.price <= limit
                 }
+            case .trailingStop:
+                // Update high water mark
+                let currentHigh = hp.pendingOrders[i].highWaterMark ?? quote.price
+                if quote.price > currentHigh {
+                    hp.pendingOrders[i].highWaterMark = quote.price
+                }
+                let hwm = hp.pendingOrders[i].highWaterMark ?? quote.price
+                // Check if price dropped by trail amount or percent
+                if let trailAmt = order.trailAmount, trailAmt > 0 {
+                    shouldFill = quote.price <= (hwm - trailAmt)
+                } else if let trailPct = order.trailPercent, trailPct > 0 {
+                    shouldFill = quote.price <= hwm * (1 - trailPct / 100.0)
+                }
             }
 
             if shouldFill {
                 let fillPrice: Double
                 switch order.type {
-                case .stopLoss: fillPrice = quote.price
+                case .stopLoss, .trailingStop: fillPrice = quote.price
                 case .limit: fillPrice = order.limitPrice ?? quote.price
                 case .stopLimit: fillPrice = order.limitPrice ?? quote.price
                 case .market: fillPrice = quote.price
                 }
                 ordersToFill.append((index: i, price: fillPrice))
+
+                // If this is a bracket order (market/limit buy with bracket SL/TP), queue bracket legs
+                if order.isBracketOrder && order.side == .buy {
+                    if let sl = order.bracketStopLoss {
+                        bracketOrdersToPlace.append(PendingOrder(
+                            symbol: order.symbol, type: .stopLoss, side: .sell,
+                            shares: order.shares, stopPrice: sl
+                        ))
+                    }
+                    if let tp = order.bracketTakeProfit {
+                        bracketOrdersToPlace.append(PendingOrder(
+                            symbol: order.symbol, type: .limit, side: .sell,
+                            shares: order.shares, limitPrice: tp
+                        ))
+                    }
+                }
             }
         }
 
-        guard !ordersToFill.isEmpty else { return }
+        guard !ordersToFill.isEmpty else {
+            // Still save if high water marks were updated
+            hp.savePendingOrders()
+            return
+        }
         for item in ordersToFill {
             hp.pendingOrders[item.index].isActive = false
             hp.pendingOrders[item.index].filledDate = Date()
+        }
+        // Place bracket legs
+        for bracketOrder in bracketOrdersToPlace {
+            hp.pendingOrders.append(bracketOrder)
         }
         hp.savePendingOrders()
 
@@ -548,6 +588,10 @@ class PortfolioManager: ObservableObject {
                 case .buy: await buy(symbol: order.symbol, shares: order.shares, price: item.price, isAutomated: true)
                 case .sell: await sell(symbol: order.symbol, shares: order.shares, price: item.price, isAutomated: true)
                 }
+            }
+            if !bracketOrdersToPlace.isEmpty {
+                sendLocalNotification(title: "Bracket Orders Placed",
+                    body: "Auto stop-loss and take-profit orders placed for filled bracket order")
             }
         }
     }
@@ -704,6 +748,8 @@ class PortfolioManager: ObservableObject {
         UserDefaults.standard.set(chartTimezone.rawValue, forKey: "chartTimezone")
         UserDefaults.standard.set(activeHub.rawValue, forKey: "activeHub")
         if let d = try? JSONEncoder().encode(enabledHubs) { UserDefaults.standard.set(d, forKey: "enabledHubs") }
+        if let d = try? JSONEncoder().encode(atmStrategies) { UserDefaults.standard.set(d, forKey: "atmStrategies") }
+        UserDefaults.standard.set(defaultATMIndex, forKey: "defaultATMIndex")
     }
 
     private func loadAppPreferences() {
@@ -719,6 +765,10 @@ class PortfolioManager: ObservableObject {
            let theme = AccentTheme(rawValue: t) { accentTheme = theme }
         if let tz = UserDefaults.standard.string(forKey: "chartTimezone"),
            let zone = ChartTimezone(rawValue: tz) { chartTimezone = zone }
+        if let d = UserDefaults.standard.data(forKey: "atmStrategies"),
+           let saved = try? JSONDecoder().decode([ATMStrategy].self, from: d) { atmStrategies = saved }
+        let savedATMIdx = UserDefaults.standard.integer(forKey: "defaultATMIndex")
+        if savedATMIdx < atmStrategies.count { defaultATMIndex = savedATMIdx }
     }
 
     /// Migrate old shared portfolio data into Paper hub on first launch

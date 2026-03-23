@@ -116,6 +116,7 @@ class StockService: ObservableObject {
     @Published var isThrottled = false       // True when Yahoo is rate-limiting us
     @Published var throttleMessage: String?  // User-facing throttle explanation
     @Published var sparklines: [String: [Double]] = [:]  // symbol -> recent closes for sparkline
+    @Published var chartDataCache: [String: [ChartDataPoint]] = [:]  // symbol -> cached chart data for indicators
 
     // Alpaca credentials (stored in Keychain)
     @Published var alpacaApiKey: String = ""
@@ -645,10 +646,18 @@ class StockService: ObservableObject {
                     open: o, high: h, low: l, close: c, volume: v
                 ))
             }
+            chartDataCache[symbol] = points
             return points
         } catch {
             return []
         }
+    }
+
+    // Also cache from hub-aware fetch
+    func fetchChartDataForHubCached(_ hub: TradingHub, symbol: String, timeframe: ChartTimeframe) async -> [ChartDataPoint] {
+        let data = await fetchChartDataForHub(hub, symbol: symbol, timeframe: timeframe)
+        if !data.isEmpty { chartDataCache[symbol] = data }
+        return data
     }
 }
 

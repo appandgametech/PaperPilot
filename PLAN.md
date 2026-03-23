@@ -103,3 +103,25 @@ PaperPilot is one app that contains 3 fully separate mini-apps. When you select 
 - `StockPaperTrader/Views/ToolsView.swift` — hub nav title
 - `StockPaperTrader/Services/StockService.swift` — futuresSymbols, alpacaWatchlist, fetchAlpacaBars(), hub-aware watchlist methods
 - `StockPaperTrader/Services/YahooModels.swift` — AlpacaBarsResponse, AlpacaBarData models
+
+### Phase 6: NinjaTrader + Yahoo 1:1 Trading & Automation Parity ✅
+- [x] Trailing Stop order type — trail by $ amount or % from high water mark
+- [x] Bracket Orders (OCO) — auto-attach stop loss + take profit to any buy
+- [x] ATM Strategy system — presets (Tight, Standard, Wide, Trail) + default picker in Futures hub
+- [x] TradeView: trailing stop UI (trail mode picker, amount/percent input, quick buttons)
+- [x] TradeView: bracket order toggle with SL/TP price inputs
+- [x] TradeView: ATM strategy picker for Futures hub (auto-fills bracket prices)
+- [x] PortfolioManager: evaluatePendingOrders handles trailing stop (high water mark tracking, trail trigger)
+- [x] PortfolioManager: evaluatePendingOrders handles bracket orders (auto-places SL/TP after fill)
+- [x] Automation: RSI Above/Below condition types with 14-period RSI computation
+- [x] Automation: MACD Cross Up/Down condition types with EMA-based MACD/Signal computation
+- [x] Automation: Time of Day condition type for time-based rules
+- [x] Automation: Trailing Stop Rule and Time-Based Entry templates
+- [x] AutomationEngine: full RSI/MACD/time evaluation logic
+- [x] StockService: chartDataCache for indicator computation
+- [x] Trade markers on charts — buy (green ▲) and sell (red ▼) arrows at trade price/date
+- [x] Entry price line — cyan dashed horizontal line at position average cost
+- [x] Both line chart and candlestick chart support trade markers + entry price
+- [x] ATM strategy management in Settings (Futures hub)
+- [x] All changes work for BOTH Paper (Yahoo) and Futures (NinjaTrader) hubs
+- [x] Files: OrderTypes.swift, Automation.swift, AutomationEngine.swift, PortfolioManager.swift, StockService.swift, TradeView.swift, AutomationView.swift, TradingDashboardView.swift, SettingsView.swift

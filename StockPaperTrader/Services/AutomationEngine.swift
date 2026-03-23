@@ -141,12 +141,77 @@ class AutomationEngine: ObservableObject {
         case .dayHigh: actual = quote.dayHigh
         case .dayLow: actual = quote.dayLow
         case .profitLossPercent: actual = position?.profitLossPercent ?? 0
+        case .rsiAbove:
+            // RSI condition: value is the RSI threshold, comparison is ignored (always "above")
+            let rsi = computeRSI(for: quote.symbol)
+            return rsi > condition.value
+        case .rsiBelow:
+            let rsi = computeRSI(for: quote.symbol)
+            return rsi < condition.value
+        case .macdCrossUp:
+            return checkMACDCross(for: quote.symbol, direction: .up)
+        case .macdCrossDown:
+            return checkMACDCross(for: quote.symbol, direction: .down)
+        case .timeOfDay:
+            // value = hour in 24h format (e.g. 9.5 = 9:30 AM)
+            let cal = Calendar.current
+            let now = Date()
+            let hour = Double(cal.component(.hour, from: now)) + Double(cal.component(.minute, from: now)) / 60.0
+            actual = hour
         }
 
         switch condition.comparison {
         case .above: return actual > condition.value
         case .below: return actual < condition.value
         case .equals: return abs(actual - condition.value) < 0.01
+        }
+    }
+
+    // MARK: - Technical Indicator Helpers
+    private enum MACDDirection { case up, down }
+
+    private func computeRSI(for symbol: String, period: Int = 14) -> Double {
+        guard let chartData = stockService?.chartDataCache[symbol], chartData.count > period else { return 50 }
+        let closes = chartData.suffix(period + 1).map(\.close)
+        var gains: Double = 0
+        var losses: Double = 0
+        for i in 1..<closes.count {
+            let change = closes[i] - closes[i - 1]
+            if change > 0 { gains += change } else { losses += abs(change) }
+        }
+        let avgGain = gains / Double(period)
+        let avgLoss = losses / Double(period)
+        guard avgLoss > 0 else { return 100 }
+        let rs = avgGain / avgLoss
+        return 100 - (100 / (1 + rs))
+    }
+
+    private func checkMACDCross(for symbol: String, direction: MACDDirection) -> Bool {
+        guard let chartData = stockService?.chartDataCache[symbol], chartData.count >= 26 else { return false }
+        let closes = chartData.map(\.close)
+        func ema(_ data: [Double], period: Int) -> [Double] {
+            guard let first = data.first else { return [] }
+            let k = 2.0 / Double(period + 1)
+            var result = [first]
+            for i in 1..<data.count {
+                result.append(data[i] * k + result[i - 1] * (1 - k))
+            }
+            return result
+        }
+        let ema12 = ema(closes, period: 12)
+        let ema26 = ema(closes, period: 26)
+        guard ema12.count >= 2, ema26.count >= 2 else { return false }
+        let macdNow = ema12.last! - ema26.last!
+        let macdPrev = ema12[ema12.count - 2] - ema26[ema26.count - 2]
+        // Signal line approximation: 9-period EMA of MACD
+        let macdLine = zip(ema12, ema26).map { $0 - $1 }
+        let signal = ema(macdLine, period: 9)
+        guard signal.count >= 2 else { return false }
+        let sigNow = signal.last!
+        let sigPrev = signal[signal.count - 2]
+        switch direction {
+        case .up: return macdPrev <= sigPrev && macdNow > sigNow
+        case .down: return macdPrev >= sigPrev && macdNow < sigNow
         }
     }
 
@@ -309,6 +374,35 @@ class AutomationEngine: ObservableObject {
 
         case .custom:
             return nil
+
+        case .trailingStopRule:
+            guard let pos = position else { return nil }
+            return AutomationRule(
+                name: "Trailing Stop: \(symbol)",
+                symbol: symbol,
+                conditions: [RuleCondition(type: .profitLossPercent, value: -3, comparison: .below)],
+                logic: .all,
+                action: .sellAll,
+                shares: pos.shares,
+                repeatMode: .once,
+                maxTriggers: 1,
+                cooldownSeconds: 0,
+                template: .trailingStopRule
+            )
+
+        case .timeBasedEntry:
+            return AutomationRule(
+                name: "Time Entry: \(symbol)",
+                symbol: symbol,
+                conditions: [RuleCondition(type: .timeOfDay, value: 9.5, comparison: .above)],
+                logic: .all,
+                action: .buy,
+                shares: 10,
+                repeatMode: .repeating,
+                maxTriggers: 5,
+                cooldownSeconds: 86400,
+                template: .timeBasedEntry
+            )
         }
     }
 

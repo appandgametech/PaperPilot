@@ -230,6 +230,17 @@ struct TradeView: View {
                         Text("Stop: $\(String(format: "%.2f", stop))")
                             .font(.caption).foregroundStyle(.red)
                     }
+                    if let trail = order.trailAmount {
+                        Text("Trail: $\(String(format: "%.2f", trail))")
+                            .font(.caption).foregroundStyle(.purple)
+                    } else if let trailPct = order.trailPercent {
+                        Text("Trail: \(String(format: "%.1f", trailPct))%")
+                            .font(.caption).foregroundStyle(.purple)
+                    }
+                    if order.isBracketOrder {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.caption2).foregroundStyle(.teal)
+                    }
                 }
             }
             Spacer()
@@ -257,6 +268,13 @@ struct TradeEntrySheet: View {
     @State private var orderType: OrderType = .market
     @State private var limitPriceText = ""
     @State private var stopPriceText = ""
+    @State private var trailAmountText = ""
+    @State private var trailPercentText = ""
+    @State private var trailMode: TrailMode = .amount
+    @State private var bracketEnabled = false
+    @State private var bracketStopLossText = ""
+    @State private var bracketTakeProfitText = ""
+    @State private var selectedATMIndex: Int? = nil
     @State private var isExecuting = false
     @State private var showConfirmation = false
     @State private var noteText = ""
@@ -266,6 +284,11 @@ struct TradeEntrySheet: View {
     enum OrderMode: String, CaseIterable {
         case shares = "Shares"
         case dollars = "Dollars"
+    }
+
+    enum TrailMode: String, CaseIterable {
+        case amount = "$ Amount"
+        case percent = "% Percent"
     }
 
     private var currentPrice: Double {
@@ -367,6 +390,107 @@ struct TradeEntrySheet: View {
                     }
                 }
 
+                // Trailing Stop settings
+                if orderType == .trailingStop {
+                    Section("Trailing Stop") {
+                        Picker("Trail By", selection: $trailMode) {
+                            ForEach(TrailMode.allCases, id: \.self) { Text($0.rawValue) }
+                        }
+                        .pickerStyle(.segmented)
+                        if trailMode == .amount {
+                            TextField("Trail Amount ($)", text: $trailAmountText)
+                                .keyboardType(.decimalPad)
+                            if currentPrice > 0 {
+                                HStack(spacing: 8) {
+                                    ForEach([1.0, 2.0, 5.0], id: \.self) { amt in
+                                        Button("$\(String(format: "%.0f", amt))") {
+                                            trailAmountText = String(format: "%.2f", amt)
+                                        }
+                                        .buttonStyle(.bordered).font(.caption)
+                                    }
+                                }
+                            }
+                        } else {
+                            TextField("Trail Percent (%)", text: $trailPercentText)
+                                .keyboardType(.decimalPad)
+                            HStack(spacing: 8) {
+                                ForEach([1, 2, 5], id: \.self) { pct in
+                                    Button("\(pct)%") {
+                                        trailPercentText = "\(pct)"
+                                    }
+                                    .buttonStyle(.bordered).font(.caption)
+                                }
+                            }
+                        }
+                        Text("Stop follows price up, triggers sell when price drops by trail amount from highest point.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+
+                // Bracket Order (OCO)
+                if orderType == .market || orderType == .limit {
+                    Section {
+                        Toggle("Attach Bracket (OCO)", isOn: $bracketEnabled)
+                        if bracketEnabled {
+                            TextField("Stop Loss Price", text: $bracketStopLossText)
+                                .keyboardType(.decimalPad)
+                            TextField("Take Profit Price", text: $bracketTakeProfitText)
+                                .keyboardType(.decimalPad)
+                            if currentPrice > 0 {
+                                HStack(spacing: 8) {
+                                    Button("SL -3%") {
+                                        bracketStopLossText = String(format: "%.2f", currentPrice * 0.97)
+                                    }
+                                    Button("TP +5%") {
+                                        bracketTakeProfitText = String(format: "%.2f", currentPrice * 1.05)
+                                    }
+                                }
+                                .buttonStyle(.bordered).font(.caption)
+                            }
+                            Text("After fill, auto-places a stop loss and take profit order.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Bracket Order")
+                    }
+                }
+
+                // ATM Strategy (Futures hub)
+                if portfolio.activeHub == .futures {
+                    Section("ATM Strategy") {
+                        Picker("Strategy", selection: $selectedATMIndex) {
+                            Text("None").tag(nil as Int?)
+                            ForEach(portfolio.atmStrategies.indices, id: \.self) { idx in
+                                Text(portfolio.atmStrategies[idx].name).tag(idx as Int?)
+                            }
+                        }
+                        if let idx = selectedATMIndex, idx < portfolio.atmStrategies.count {
+                            let atm = portfolio.atmStrategies[idx]
+                            HStack {
+                                Label("SL: \(String(format: "%.1f", atm.stopLossPoints)) pts", systemImage: "shield.slash")
+                                    .font(.caption).foregroundStyle(.red)
+                                Spacer()
+                                Label("TP: \(String(format: "%.1f", atm.takeProfitPoints)) pts", systemImage: "target")
+                                    .font(.caption).foregroundStyle(.green)
+                            }
+                            if atm.trailAfterProfit {
+                                Text("Trail \(String(format: "%.1f", atm.trailAmount)) pts after profit target")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .onChange(of: selectedATMIndex) { _, newIdx in
+                        if let idx = newIdx, idx < portfolio.atmStrategies.count {
+                            let atm = portfolio.atmStrategies[idx]
+                            bracketEnabled = true
+                            if currentPrice > 0 {
+                                bracketStopLossText = String(format: "%.2f", currentPrice - atm.stopLossPoints)
+                                bracketTakeProfitText = String(format: "%.2f", currentPrice + atm.takeProfitPoints)
+                            }
+                        }
+                    }
+                }
+
                 Section("Preview") {
                     HStack {
                         Text("Current Price")
@@ -452,6 +576,17 @@ struct TradeEntrySheet: View {
                 if let tradeNote, let lastTrade = portfolio.tradeHistory.first {
                     portfolio.updateTradeNote(tradeId: lastTrade.id, note: tradeNote)
                 }
+                // Place bracket orders after market fill
+                if bracketEnabled && tradeType == .buy {
+                    if let sl = Double(bracketStopLossText), sl > 0 {
+                        let slOrder = PendingOrder(symbol: sym, type: .stopLoss, side: .sell, shares: shares, stopPrice: sl)
+                        portfolio.placePendingOrder(slOrder)
+                    }
+                    if let tp = Double(bracketTakeProfitText), tp > 0 {
+                        let tpOrder = PendingOrder(symbol: sym, type: .limit, side: .sell, shares: shares, limitPrice: tp)
+                        portfolio.placePendingOrder(tpOrder)
+                    }
+                }
                 isExecuting = false
                 if portfolio.errorMessage == nil { dismiss() }
             }
@@ -462,7 +597,11 @@ struct TradeEntrySheet: View {
                 side: tradeType,
                 shares: shares,
                 limitPrice: Double(limitPriceText),
-                stopPrice: Double(stopPriceText)
+                stopPrice: Double(stopPriceText),
+                trailAmount: trailMode == .amount ? Double(trailAmountText) : nil,
+                trailPercent: trailMode == .percent ? Double(trailPercentText) : nil,
+                bracketStopLoss: bracketEnabled ? Double(bracketStopLossText) : nil,
+                bracketTakeProfit: bracketEnabled ? Double(bracketTakeProfitText) : nil
             )
             portfolio.placePendingOrder(order)
             dismiss()
@@ -698,12 +837,38 @@ struct TradeInfoSheet: View {
                     Label {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Pending Orders").font(.subheadline.bold())
-                            Text("Limit, Stop Loss, and Stop Limit orders appear in the Pending Orders section. They fill automatically when the market price meets your conditions. Cancel anytime.")
+                            Text("Limit, Stop Loss, Stop Limit, and Trailing Stop orders appear in the Pending Orders section. They fill automatically when the market price meets your conditions. Cancel anytime.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     } icon: {
                         Image(systemName: "clock.arrow.circlepath")
                             .foregroundStyle(.purple)
+                    }
+                }
+
+                Section {
+                    Label {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Trailing Stop").font(.subheadline.bold())
+                            Text("A trailing stop follows the price upward and triggers a sell when the price drops by your trail amount ($ or %). Great for locking in profits while letting winners run.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "arrow.down.right")
+                            .foregroundStyle(.purple)
+                    }
+                }
+
+                Section {
+                    Label {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Bracket Orders (OCO)").font(.subheadline.bold())
+                            Text("Attach a stop loss and take profit to any buy order. After the buy fills, PaperPilot auto-places both exit orders. When one fills, the other cancels.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "arrow.triangle.branch")
+                            .foregroundStyle(.teal)
                     }
                 }
 

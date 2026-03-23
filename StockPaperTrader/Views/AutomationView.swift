@@ -345,6 +345,16 @@ struct RuleRowV2: View {
                 return "\(String(format: "%.0fK", cond.value / 1_000))"
             }
             return "\(Int(cond.value))"
+        case .rsiAbove, .rsiBelow:
+            return "\(String(format: "%.0f", cond.value))"
+        case .macdCrossUp:
+            return "Signal ↑"
+        case .macdCrossDown:
+            return "Signal ↓"
+        case .timeOfDay:
+            let hour = Int(cond.value)
+            let min = Int((cond.value - Double(hour)) * 60)
+            return String(format: "%d:%02d", hour, min)
         }
     }
 
@@ -544,6 +554,9 @@ struct AddRuleSheet: View {
         case .price, .dayHigh, .dayLow: return "$"
         case .changePercent, .profitLossPercent: return "%"
         case .volume: return "#"
+        case .rsiAbove, .rsiBelow: return "RSI"
+        case .macdCrossUp, .macdCrossDown: return "—"
+        case .timeOfDay: return "Hour"
         }
     }
 
@@ -635,6 +648,18 @@ struct AddRuleSheet: View {
                 repeatMode = .repeating
                 maxTriggers = "2"
                 cooldownMinutes = "120"
+            case .trailingStopRule:
+                conditions = [RuleCondition(type: .profitLossPercent, value: -3, comparison: .below)]
+                action = .sellAll
+                repeatMode = .once
+                name = "Trailing Stop: \(sym)"
+            case .timeBasedEntry:
+                conditions = [RuleCondition(type: .timeOfDay, value: 9.5, comparison: .equals)]
+                action = .buy
+                repeatMode = .repeating
+                maxTriggers = "5"
+                cooldownMinutes = "1440"
+                name = "Time Entry: \(sym)"
             case .custom:
                 break
             }

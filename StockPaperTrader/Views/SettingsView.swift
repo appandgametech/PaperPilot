@@ -279,6 +279,38 @@ struct SettingsView: View {
             } header: {
                 Text("Market Data")
             }
+
+            // ATM Strategy Management
+            Section {
+                ForEach(portfolio.atmStrategies.indices, id: \.self) { idx in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(portfolio.atmStrategies[idx].name)
+                                .font(.subheadline.bold())
+                            Text("SL: \(String(format: "%.1f", portfolio.atmStrategies[idx].stopLossPoints)) pts · TP: \(String(format: "%.1f", portfolio.atmStrategies[idx].takeProfitPoints)) pts")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if idx == portfolio.defaultATMIndex {
+                            Text("Default")
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.blue.opacity(0.15), in: Capsule())
+                                .foregroundStyle(.blue)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        portfolio.defaultATMIndex = idx
+                        portfolio.saveUserPreferences()
+                    }
+                }
+            } header: {
+                Label("ATM Strategies", systemImage: "target")
+            } footer: {
+                Text("Tap a strategy to set it as default. ATM strategies auto-attach stop loss and take profit to futures trades.")
+            }
         }
     }
 
