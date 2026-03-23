@@ -15,6 +15,12 @@ struct TradingDashboardView: View {
     @State private var enabledWidgets: Set<DashboardWidget> = [
         .priceChart, .volumeBars, .dayRange, .stats, .rsi
     ]
+    @StateObject private var annotationStore = ChartAnnotationStore.shared
+    @State private var activeDrawingTool: ChartDrawingTool? = nil
+    @State private var showDrawingTools = false
+    @State private var showAnnotationList = false
+    @State private var showTimezonePicker = false
+    @State private var drawingPoint1: (index: Int, price: Double)? = nil
 
     private var isWide: Bool { sizeClass == .regular }
 
@@ -43,6 +49,11 @@ struct TradingDashboardView: View {
 
                             // Timeframe + chart style
                             controlBar
+
+                            // Drawing tools bar
+                            if showDrawingTools {
+                                drawingToolsBar
+                            }
 
                             // Widgets — adaptive layout
                             let activeWidgets = DashboardWidget.allCases.filter { enabledWidgets.contains($0) }
@@ -75,6 +86,26 @@ struct TradingDashboardView: View {
                         Image(systemName: "info.circle")
                     }
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showTimezonePicker = true } label: {
+                        Text(portfolio.chartTimezone.abbreviation)
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showDrawingTools.toggle() } label: {
+                        Image(systemName: activeDrawingTool != nil ? "pencil.circle.fill" : "pencil.tip.crop.circle")
+                            .foregroundStyle(activeDrawingTool != nil ? portfolio.activeHub.accentColor : .secondary)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showAnnotationList = true } label: {
+                        Image(systemName: "list.bullet.rectangle")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showWidgetPicker = true } label: {
                         Image(systemName: "square.grid.2x2")
@@ -93,6 +124,12 @@ struct TradingDashboardView: View {
             }
             .sheet(isPresented: $showChartInfo) {
                 ChartInfoSheet()
+            }
+            .sheet(isPresented: $showAnnotationList) {
+                AnnotationListSheet(hub: portfolio.activeHub, symbol: selectedSymbol)
+            }
+            .sheet(isPresented: $showTimezonePicker) {
+                TimezonePickerSheet()
             }
             #if !targetEnvironment(macCatalyst)
             .fullScreenCover(item: $fullscreenWidget) { widget in
@@ -233,6 +270,114 @@ struct TradingDashboardView: View {
         isLoadingChart = true
         chartData = await stockService.fetchChartDataForHub(portfolio.activeHub, symbol: selectedSymbol, timeframe: timeframe)
         isLoadingChart = false
+        // Load annotations for this symbol
+        annotationStore.loadAnnotations(hub: portfolio.activeHub, symbol: selectedSymbol)
+    }
+
+    // MARK: - Drawing Tools Bar
+    private var drawingToolsBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(ChartDrawingTool.allCases) { tool in
+                    Button {
+                        if activeDrawingTool == tool {
+                            activeDrawingTool = nil
+                            drawingPoint1 = nil
+                        } else {
+                            activeDrawingTool = tool
+                            drawingPoint1 = nil
+                        }
+                        HapticManager.selectionFeedback()
+                    } label: {
+                        VStack(spacing: 2) {
+                            Image(systemName: tool.icon)
+                                .font(.caption)
+                            Text(tool.rawValue)
+                                .font(.system(size: 8))
+                        }
+                        .frame(width: 64, height: 40)
+                        .background(
+                            activeDrawingTool == tool
+                                ? portfolio.activeHub.accentColor.opacity(0.2)
+                                : Color.secondary.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(activeDrawingTool == tool ? portfolio.activeHub.accentColor : .clear, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(activeDrawingTool == tool ? portfolio.activeHub.accentColor : .secondary)
+                }
+
+                Divider().frame(height: 30)
+
+                // Cancel drawing
+                if activeDrawingTool != nil {
+                    Button {
+                        activeDrawingTool = nil
+                        drawingPoint1 = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                // Clear all
+                Button {
+                    annotationStore.clearAll(hub: portfolio.activeHub, symbol: selectedSymbol)
+                    HapticManager.selectionFeedback()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                        .foregroundStyle(.red.opacity(0.7))
+                        .frame(width: 40, height: 40)
+                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    // MARK: - Handle chart tap for drawing
+    func handleChartTap(index: Int, price: Double) {
+        guard let tool = activeDrawingTool else { return }
+
+        if tool.pointsRequired == 1 {
+            // Single-point tools: create immediately
+            let annotation = ChartAnnotation(
+                tool: tool,
+                label: tool == .text ? "Note" : "",
+                price1: price,
+                dateIndex1: index,
+                textContent: tool == .text ? "Label" : nil
+            )
+            annotationStore.add(annotation, hub: portfolio.activeHub, symbol: selectedSymbol)
+            activeDrawingTool = nil
+            HapticManager.tradeFeedback()
+        } else if drawingPoint1 == nil {
+            // First point of a 2-point tool
+            drawingPoint1 = (index: index, price: price)
+            HapticManager.selectionFeedback()
+        } else {
+            // Second point — create the annotation
+            let p1 = drawingPoint1!
+            let annotation = ChartAnnotation(
+                tool: tool,
+                price1: p1.price,
+                price2: price,
+                dateIndex1: p1.index,
+                dateIndex2: index
+            )
+            annotationStore.add(annotation, hub: portfolio.activeHub, symbol: selectedSymbol)
+            drawingPoint1 = nil
+            activeDrawingTool = nil
+            HapticManager.tradeFeedback()
+        }
     }
 
     // MARK: - Widget Router
@@ -267,6 +412,11 @@ struct TradingDashboardView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("Price").font(.caption.bold()).foregroundStyle(.secondary)
+                if activeDrawingTool != nil {
+                    Text("· Tap chart to place \(drawingPoint1 != nil ? "point 2" : "point 1")")
+                        .font(.caption2)
+                        .foregroundStyle(portfolio.activeHub.accentColor)
+                }
                 Spacer()
                 expandButton(.priceChart)
             }
@@ -278,12 +428,29 @@ struct TradingDashboardView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 260)
             } else {
+                let annotations = annotationStore.annotationsFor(hub: portfolio.activeHub, symbol: selectedSymbol).filter(\.isVisible)
                 if chartStyle == .line {
-                    InteractiveLineChartView(data: chartData, timeframe: timeframe)
-                        .frame(height: 280)
+                    InteractiveLineChartView(
+                        data: chartData,
+                        timeframe: timeframe,
+                        annotations: annotations,
+                        activeDrawingTool: activeDrawingTool,
+                        drawingPoint1: drawingPoint1,
+                        chartTimeZone: portfolio.chartTimezone.timeZone,
+                        onChartTap: { index, price in handleChartTap(index: index, price: price) }
+                    )
+                    .frame(height: 280)
                 } else {
-                    InteractiveCandlestickChartView(data: chartData, timeframe: timeframe)
-                        .frame(height: 280)
+                    InteractiveCandlestickChartView(
+                        data: chartData,
+                        timeframe: timeframe,
+                        annotations: annotations,
+                        activeDrawingTool: activeDrawingTool,
+                        drawingPoint1: drawingPoint1,
+                        chartTimeZone: portfolio.chartTimezone.timeZone,
+                        onChartTap: { index, price in handleChartTap(index: index, price: price) }
+                    )
+                    .frame(height: 280)
                 }
             }
         }
@@ -882,8 +1049,9 @@ struct ChartLayout {
         return String(format: "$%.2f", value)
     }
 
-    static func timeLabel(for date: Date, timeframe: ChartTimeframe) -> String {
+    static func timeLabel(for date: Date, timeframe: ChartTimeframe, timeZone: TimeZone = .current) -> String {
         let f = DateFormatter()
+        f.timeZone = timeZone
         switch timeframe {
         case .oneDay:
             f.dateFormat = "h:mma"
@@ -899,8 +1067,9 @@ struct ChartLayout {
         return f.string(from: date).lowercased()
     }
 
-    static func crosshairTime(for date: Date, timeframe: ChartTimeframe) -> String {
+    static func crosshairTime(for date: Date, timeframe: ChartTimeframe, timeZone: TimeZone = .current) -> String {
         let f = DateFormatter()
+        f.timeZone = timeZone
         switch timeframe {
         case .oneDay:
             f.dateFormat = "h:mm:ss a"
@@ -917,6 +1086,11 @@ struct ChartLayout {
 struct InteractiveLineChartView: View {
     let data: [ChartDataPoint]
     let timeframe: ChartTimeframe
+    var annotations: [ChartAnnotation] = []
+    var activeDrawingTool: ChartDrawingTool? = nil
+    var drawingPoint1: (index: Int, price: Double)? = nil
+    var chartTimeZone: TimeZone = .current
+    var onChartTap: ((Int, Double) -> Void)? = nil
 
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
@@ -930,6 +1104,12 @@ struct InteractiveLineChartView: View {
         return Array(data[startIdx..<count])
     }
 
+    private var visibleOffset: Int {
+        let count = data.count
+        let visibleCount = max(10, Int(CGFloat(count) / scale))
+        return max(0, count - visibleCount)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             crosshairBar.frame(height: 20)
@@ -939,8 +1119,10 @@ struct InteractiveLineChartView: View {
                     ZStack {
                         Canvas { context, size in
                             drawLineChart(context: context, size: size)
+                            drawAnnotations(context: context, size: size)
                         }
                         .contentShape(Rectangle())
+                        .simultaneousGesture(tapGesture(in: geo.size))
                         .simultaneousGesture(dragGesture(in: geo.size))
                         .simultaneousGesture(magnificationGesture)
 
@@ -958,12 +1140,34 @@ struct InteractiveLineChartView: View {
         }
     }
 
+    // MARK: - Tap gesture for drawing tools
+    private func tapGesture(in size: CGSize) -> some Gesture {
+        SpatialTapGesture()
+            .onEnded { value in
+                guard activeDrawingTool != nil else { return }
+                let vd = visibleData
+                guard vd.count >= 2 else { return }
+                let stepX = size.width / CGFloat(vd.count - 1)
+                let idx = max(0, min(vd.count - 1, Int(round(value.location.x / stepX))))
+                let closes = vd.map(\.close)
+                let padding: CGFloat = 8
+                let minY = (closes.min() ?? 0) * 0.999
+                let maxY = (closes.max() ?? 1) * 1.001
+                let range = maxY - minY
+                guard range > 0 else { return }
+                let chartH = size.height - padding * 2
+                let price = maxY - ((value.location.y - padding) / chartH) * range
+                let globalIdx = idx + visibleOffset
+                onChartTap?(globalIdx, price)
+            }
+    }
+
     private var crosshairBar: some View {
         Group {
             if let idx = crosshairIndex, idx >= 0, idx < visibleData.count {
                 let pt = visibleData[idx]
                 HStack(spacing: 8) {
-                    Text(ChartLayout.crosshairTime(for: pt.date, timeframe: timeframe))
+                    Text(ChartLayout.crosshairTime(for: pt.date, timeframe: timeframe, timeZone: chartTimeZone))
                         .font(.caption2.bold())
                     Spacer()
                     Text("O:\(ChartLayout.priceFormat(pt.open))")
@@ -979,11 +1183,16 @@ struct InteractiveLineChartView: View {
                 .padding(.horizontal, 4)
             } else {
                 HStack {
-                    #if targetEnvironment(macCatalyst)
-                    Text("Click & drag for crosshair · Scroll to zoom")
-                    #else
-                    Text("Long press for crosshair · Pinch to zoom")
-                    #endif
+                    if activeDrawingTool != nil {
+                        Text("Tap chart to place point")
+                            .foregroundStyle(.orange)
+                    } else {
+                        #if targetEnvironment(macCatalyst)
+                        Text("Click & drag for crosshair · Scroll to zoom")
+                        #else
+                        Text("Long press for crosshair · Pinch to zoom")
+                        #endif
+                    }
                 }
                 .font(.caption2).foregroundStyle(.tertiary)
                 .padding(.horizontal, 4)
@@ -1058,6 +1267,125 @@ struct InteractiveLineChartView: View {
         }
     }
 
+    // MARK: - Draw Annotations
+    private func drawAnnotations(context: GraphicsContext, size: CGSize) {
+        let vd = visibleData
+        guard vd.count >= 2 else { return }
+        let closes = vd.map(\.close)
+        let padding: CGFloat = 8
+        let minY = (closes.min() ?? 0) * 0.999
+        let maxY = (closes.max() ?? 1) * 1.001
+        let range = maxY - minY
+        guard range > 0 else { return }
+        let chartH = size.height - padding * 2
+        let stepX = size.width / CGFloat(vd.count - 1)
+        let offset = visibleOffset
+
+        func priceToY(_ price: Double) -> CGFloat {
+            padding + chartH - ((price - minY) / range) * chartH
+        }
+        func indexToX(_ globalIdx: Int) -> CGFloat {
+            CGFloat(globalIdx - offset) * stepX
+        }
+
+        for ann in annotations {
+            let color = ann.color
+            let lw = ann.lineWidth
+
+            switch ann.tool {
+            case .horizontalLine:
+                let y = priceToY(ann.price1)
+                if y >= 0 && y <= size.height {
+                    var p = Path()
+                    p.move(to: CGPoint(x: 0, y: y))
+                    p.addLine(to: CGPoint(x: size.width, y: y))
+                    context.stroke(p, with: .color(color), style: StrokeStyle(lineWidth: lw, dash: [6, 4]))
+                    // Label
+                    let labelText = ann.label.isEmpty ? ChartLayout.priceFormat(ann.price1) : ann.label
+                    let resolved = context.resolve(Text(labelText).font(.system(size: 9).bold()).foregroundColor(color))
+                    context.draw(resolved, at: CGPoint(x: 4, y: y - 8), anchor: .topLeading)
+                }
+
+            case .horizontalRay:
+                let y = priceToY(ann.price1)
+                let x = indexToX(ann.dateIndex1)
+                if y >= 0 && y <= size.height {
+                    var p = Path()
+                    p.move(to: CGPoint(x: max(0, x), y: y))
+                    p.addLine(to: CGPoint(x: size.width, y: y))
+                    context.stroke(p, with: .color(color), style: StrokeStyle(lineWidth: lw))
+                    if !ann.label.isEmpty {
+                        let resolved = context.resolve(Text(ann.label).font(.system(size: 9).bold()).foregroundColor(color))
+                        context.draw(resolved, at: CGPoint(x: max(4, x + 4), y: y - 8), anchor: .topLeading)
+                    }
+                }
+
+            case .trendLine:
+                guard let p2 = ann.price2, let di2 = ann.dateIndex2 else { continue }
+                let x1 = indexToX(ann.dateIndex1)
+                let y1 = priceToY(ann.price1)
+                let x2 = indexToX(di2)
+                let y2 = priceToY(p2)
+                var p = Path()
+                p.move(to: CGPoint(x: x1, y: y1))
+                p.addLine(to: CGPoint(x: x2, y: y2))
+                context.stroke(p, with: .color(color), lineWidth: lw)
+                if !ann.label.isEmpty {
+                    let midX = (x1 + x2) / 2
+                    let midY = (y1 + y2) / 2
+                    let resolved = context.resolve(Text(ann.label).font(.system(size: 9).bold()).foregroundColor(color))
+                    context.draw(resolved, at: CGPoint(x: midX, y: midY - 10), anchor: .bottom)
+                }
+
+            case .fibonacciRetracement:
+                guard let p2 = ann.price2 else { continue }
+                let high = max(ann.price1, p2)
+                let low = min(ann.price1, p2)
+                let fibRange = high - low
+                for level in ChartAnnotation.fibLevels {
+                    let price = high - fibRange * level
+                    let y = priceToY(price)
+                    if y >= 0 && y <= size.height {
+                        var fp = Path()
+                        fp.move(to: CGPoint(x: 0, y: y))
+                        fp.addLine(to: CGPoint(x: size.width, y: y))
+                        let alpha = level == 0 || level == 1 ? 0.6 : 0.3
+                        context.stroke(fp, with: .color(color.opacity(alpha)), style: StrokeStyle(lineWidth: 0.8, dash: [4, 3]))
+                        let pctText = String(format: "%.1f%% — %@", level * 100, ChartLayout.priceFormat(price))
+                        let resolved = context.resolve(Text(pctText).font(.system(size: 8)).foregroundColor(color.opacity(0.8)))
+                        context.draw(resolved, at: CGPoint(x: size.width - 4, y: y - 6), anchor: .topTrailing)
+                    }
+                }
+
+            case .rectangle:
+                guard let p2 = ann.price2, let di2 = ann.dateIndex2 else { continue }
+                let x1 = indexToX(ann.dateIndex1)
+                let y1 = priceToY(ann.price1)
+                let x2 = indexToX(di2)
+                let y2 = priceToY(p2)
+                let rect = CGRect(x: min(x1, x2), y: min(y1, y2), width: abs(x2 - x1), height: abs(y2 - y1))
+                context.fill(Path(rect), with: .color(color.opacity(0.08)))
+                context.stroke(Path(rect), with: .color(color.opacity(0.5)), lineWidth: lw)
+
+            case .text:
+                let x = indexToX(ann.dateIndex1)
+                let y = priceToY(ann.price1)
+                let txt = ann.textContent ?? ann.label
+                if !txt.isEmpty {
+                    let resolved = context.resolve(Text(txt).font(.system(size: 10).bold()).foregroundColor(color))
+                    context.draw(resolved, at: CGPoint(x: x, y: y), anchor: .center)
+                }
+            }
+        }
+
+        // Draw in-progress point 1 marker
+        if let p1 = drawingPoint1 {
+            let x = indexToX(p1.index)
+            let y = priceToY(p1.price)
+            context.fill(Path(ellipseIn: CGRect(x: x - 4, y: y - 4, width: 8, height: 8)), with: .color(.orange))
+        }
+    }
+
     private func crosshairOverlay(at idx: Int, size: CGSize) -> some View {
         let vd = visibleData
         let closes = vd.map(\.close)
@@ -1115,7 +1443,7 @@ struct InteractiveLineChartView: View {
                 ForEach(0..<labelCount, id: \.self) { i in
                     let idx = min(i * step, count - 1)
                     let x = geo.size.width * CGFloat(idx) / CGFloat(count - 1)
-                    Text(ChartLayout.timeLabel(for: vd[idx].date, timeframe: timeframe))
+                    Text(ChartLayout.timeLabel(for: vd[idx].date, timeframe: timeframe, timeZone: chartTimeZone))
                         .font(.system(size: 8).monospacedDigit())
                         .foregroundStyle(.tertiary)
                         .position(x: x, y: ChartLayout.xAxisHeight / 2)
@@ -1176,6 +1504,11 @@ struct InteractiveLineChartView: View {
 struct InteractiveCandlestickChartView: View {
     let data: [ChartDataPoint]
     let timeframe: ChartTimeframe
+    var annotations: [ChartAnnotation] = []
+    var activeDrawingTool: ChartDrawingTool? = nil
+    var drawingPoint1: (index: Int, price: Double)? = nil
+    var chartTimeZone: TimeZone = .current
+    var onChartTap: ((Int, Double) -> Void)? = nil
 
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
@@ -1189,6 +1522,12 @@ struct InteractiveCandlestickChartView: View {
         return Array(data[startIdx..<count])
     }
 
+    private var visibleOffset: Int {
+        let count = data.count
+        let visibleCount = max(10, Int(CGFloat(count) / scale))
+        return max(0, count - visibleCount)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             crosshairBar.frame(height: 20)
@@ -1198,8 +1537,10 @@ struct InteractiveCandlestickChartView: View {
                     ZStack {
                         Canvas { context, size in
                             drawCandlestickChart(context: context, size: size)
+                            drawCandleAnnotations(context: context, size: size)
                         }
                         .contentShape(Rectangle())
+                        .simultaneousGesture(candleTapGesture(in: geo.size))
                         .simultaneousGesture(dragGesture(in: geo.size))
                         .simultaneousGesture(magnificationGesture)
 
@@ -1217,12 +1558,34 @@ struct InteractiveCandlestickChartView: View {
         }
     }
 
+    // MARK: - Tap gesture for drawing tools
+    private func candleTapGesture(in size: CGSize) -> some Gesture {
+        SpatialTapGesture()
+            .onEnded { value in
+                guard activeDrawingTool != nil else { return }
+                let vd = visibleData
+                guard vd.count >= 2 else { return }
+                let stepX = size.width / CGFloat(vd.count)
+                let idx = max(0, min(vd.count - 1, Int(value.location.x / stepX)))
+                let allPrices = vd.flatMap { [$0.high, $0.low] }
+                let padding: CGFloat = 8
+                let minY = (allPrices.min() ?? 0) * 0.999
+                let maxY = (allPrices.max() ?? 1) * 1.001
+                let range = maxY - minY
+                guard range > 0 else { return }
+                let chartH = size.height - padding * 2
+                let price = maxY - ((value.location.y - padding) / chartH) * range
+                let globalIdx = idx + visibleOffset
+                onChartTap?(globalIdx, price)
+            }
+    }
+
     private var crosshairBar: some View {
         Group {
             if let idx = crosshairIndex, idx >= 0, idx < visibleData.count {
                 let pt = visibleData[idx]
                 HStack(spacing: 8) {
-                    Text(ChartLayout.crosshairTime(for: pt.date, timeframe: timeframe))
+                    Text(ChartLayout.crosshairTime(for: pt.date, timeframe: timeframe, timeZone: chartTimeZone))
                         .font(.caption2.bold())
                     Spacer()
                     Text("O:\(ChartLayout.priceFormat(pt.open))")
@@ -1240,11 +1603,16 @@ struct InteractiveCandlestickChartView: View {
                 .padding(.horizontal, 4)
             } else {
                 HStack {
-                    #if targetEnvironment(macCatalyst)
-                    Text("Click & drag for crosshair · Scroll to zoom")
-                    #else
-                    Text("Long press for crosshair · Pinch to zoom")
-                    #endif
+                    if activeDrawingTool != nil {
+                        Text("Tap chart to place point")
+                            .foregroundStyle(.orange)
+                    } else {
+                        #if targetEnvironment(macCatalyst)
+                        Text("Click & drag for crosshair · Scroll to zoom")
+                        #else
+                        Text("Long press for crosshair · Pinch to zoom")
+                        #endif
+                    }
                 }
                 .font(.caption2).foregroundStyle(.tertiary)
                 .padding(.horizontal, 4)
@@ -1277,9 +1645,11 @@ struct InteractiveCandlestickChartView: View {
 
         for (i, point) in vd.enumerated() {
             let x = CGFloat(i) * stepX + stepX / 2
+            // Green = close >= open (bullish), Red = close < open (bearish)
             let isGreen = point.close >= point.open
             let color: Color = isGreen ? .green : .red
 
+            // Wick (high to low)
             let highY = padding + chartH - ((point.high - minY) / range) * chartH
             let lowY = padding + chartH - ((point.low - minY) / range) * chartH
             var wick = Path()
@@ -1287,6 +1657,7 @@ struct InteractiveCandlestickChartView: View {
             wick.addLine(to: CGPoint(x: x, y: lowY))
             context.stroke(wick, with: .color(color), lineWidth: 1)
 
+            // Body (open to close)
             let openY = padding + chartH - ((point.open - minY) / range) * chartH
             let closeY = padding + chartH - ((point.close - minY) / range) * chartH
             let bodyTop = min(openY, closeY)
@@ -1296,125 +1667,123 @@ struct InteractiveCandlestickChartView: View {
         }
     }
 
-    private func candleCrosshairOverlay(at idx: Int, size: CGSize) -> some View {
+    // MARK: - Draw Annotations on Candlestick
+    private func drawCandleAnnotations(context: GraphicsContext, size: CGSize) {
         let vd = visibleData
+        guard vd.count >= 2 else { return }
         let allPrices = vd.flatMap { [$0.high, $0.low] }
         let padding: CGFloat = 8
         let minY = (allPrices.min() ?? 0) * 0.999
         let maxY = (allPrices.max() ?? 1) * 1.001
         let range = maxY - minY
+        guard range > 0 else { return }
         let chartH = size.height - padding * 2
         let stepX = size.width / CGFloat(vd.count)
-        let x = CGFloat(idx) * stepX + stepX / 2
-        let y = range > 0 ? padding + chartH - ((vd[idx].close - minY) / range) * chartH : size.height / 2
+        let offset = visibleOffset
 
-        return ZStack {
-            Path { p in p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: size.height)) }
-                .stroke(.secondary.opacity(0.4), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
-            Path { p in p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: size.width, y: y)) }
-                .stroke(.secondary.opacity(0.4), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
-            Circle().fill(.white).frame(width: 8, height: 8).shadow(color: .blue, radius: 3).position(x: x, y: y)
-            Text(ChartLayout.priceFormat(vd[idx].close))
-                .font(.caption2.bold().monospacedDigit())
-                .padding(.horizontal, 4).padding(.vertical, 2)
-                .background(.blue, in: RoundedRectangle(cornerRadius: 4))
-                .foregroundStyle(.white)
-                .position(x: min(max(30, x), size.width - 30), y: max(16, y - 16))
+        func priceToY(_ price: Double) -> CGFloat {
+            padding + chartH - ((price - minY) / range) * chartH
         }
-        .allowsHitTesting(false)
-    }
+        func indexToX(_ globalIdx: Int) -> CGFloat {
+            CGFloat(globalIdx - offset) * stepX + stepX / 2
+        }
 
-    private var yAxisLabels: some View {
-        let allPrices = visibleData.flatMap { [$0.high, $0.low] }
-        let minY = (allPrices.min() ?? 0) * 0.999
-        let maxY = (allPrices.max() ?? 1) * 1.001
-        return GeometryReader { geo in
-            let padding: CGFloat = 8
-            let chartH = geo.size.height - padding * 2
-            ForEach(0...ChartLayout.gridLineCount, id: \.self) { i in
-                let frac = CGFloat(i) / CGFloat(ChartLayout.gridLineCount)
-                let value = maxY - (maxY - minY) * Double(frac)
-                let y = padding + chartH * frac
-                Text(ChartLayout.priceFormat(value))
-                    .font(.system(size: 9).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .position(x: ChartLayout.yAxisWidth / 2, y: y)
+        for ann in annotations {
+            let color = ann.color
+            let lw = ann.lineWidth
+
+            switch ann.tool {
+            case .horizontalLine:
+                let y = priceToY(ann.price1)
+                if y >= 0 && y <= size.height {
+                    var p = Path()
+                    p.move(to: CGPoint(x: 0, y: y))
+                    p.addLine(to: CGPoint(x: size.width, y: y))
+                    context.stroke(p, with: .color(color), style: StrokeStyle(lineWidth: lw, dash: [6, 4]))
+                    let labelText = ann.label.isEmpty ? ChartLayout.priceFormat(ann.price1) : ann.label
+                    let resolved = context.resolve(Text(labelText).font(.system(size: 9).bold()).foregroundColor(color))
+                    context.draw(resolved, at: CGPoint(x: 4, y: y - 8), anchor: .topLeading)
+                }
+
+            case .horizontalRay:
+                let y = priceToY(ann.price1)
+                let x = indexToX(ann.dateIndex1)
+                if y >= 0 && y <= size.height {
+                    var p = Path()
+                    p.move(to: CGPoint(x: max(0, x), y: y))
+                    p.addLine(to: CGPoint(x: size.width, y: y))
+                    context.stroke(p, with: .color(color), style: StrokeStyle(lineWidth: lw))
+                    if !ann.label.isEmpty {
+                        let resolved = context.resolve(Text(ann.label).font(.system(size: 9).bold()).foregroundColor(color))
+                        context.draw(resolved, at: CGPoint(x: max(4, x + 4), y: y - 8), anchor: .topLeading)
+                    }
+                }
+
+            case .trendLine:
+                guard let p2 = ann.price2, let di2 = ann.dateIndex2 else { continue }
+                let x1 = indexToX(ann.dateIndex1)
+                let y1 = priceToY(ann.price1)
+                let x2 = indexToX(di2)
+                let y2 = priceToY(p2)
+                var p = Path()
+                p.move(to: CGPoint(x: x1, y: y1))
+                p.addLine(to: CGPoint(x: x2, y: y2))
+                context.stroke(p, with: .color(color), lineWidth: lw)
+                if !ann.label.isEmpty {
+                    let midX = (x1 + x2) / 2
+                    let midY = (y1 + y2) / 2
+                    let resolved = context.resolve(Text(ann.label).font(.system(size: 9).bold()).foregroundColor(color))
+                    context.draw(resolved, at: CGPoint(x: midX, y: midY - 10), anchor: .bottom)
+                }
+
+            case .fibonacciRetracement:
+                guard let p2 = ann.price2 else { continue }
+                let high = max(ann.price1, p2)
+                let low = min(ann.price1, p2)
+                let fibRange = high - low
+                for level in ChartAnnotation.fibLevels {
+                    let price = high - fibRange * level
+                    let y = priceToY(price)
+                    if y >= 0 && y <= size.height {
+                        var fp = Path()
+                        fp.move(to: CGPoint(x: 0, y: y))
+                        fp.addLine(to: CGPoint(x: size.width, y: y))
+                        let alpha = level == 0 || level == 1 ? 0.6 : 0.3
+                        context.stroke(fp, with: .color(color.opacity(alpha)), style: StrokeStyle(lineWidth: 0.8, dash: [4, 3]))
+                        let pctText = String(format: "%.1f%% — %@", level * 100, ChartLayout.priceFormat(price))
+                        let resolved = context.resolve(Text(pctText).font(.system(size: 8)).foregroundColor(color.opacity(0.8)))
+                        context.draw(resolved, at: CGPoint(x: size.width - 4, y: y - 6), anchor: .topTrailing)
+                    }
+                }
+
+            case .rectangle:
+                guard let p2 = ann.price2, let di2 = ann.dateIndex2 else { continue }
+                let x1 = indexToX(ann.dateIndex1)
+                let y1 = priceToY(ann.price1)
+                let x2 = indexToX(di2)
+                let y2 = priceToY(p2)
+                let rect = CGRect(x: min(x1, x2), y: min(y1, y2), width: abs(x2 - x1), height: abs(y2 - y1))
+                context.fill(Path(rect), with: .color(color.opacity(0.08)))
+                context.stroke(Path(rect), with: .color(color.opacity(0.5)), lineWidth: lw)
+
+            case .text:
+                let x = indexToX(ann.dateIndex1)
+                let y = priceToY(ann.price1)
+                let txt = ann.textContent ?? ann.label
+                if !txt.isEmpty {
+                    let resolved = context.resolve(Text(txt).font(.system(size: 10).bold()).foregroundColor(color))
+                    context.draw(resolved, at: CGPoint(x: x, y: y), anchor: .center)
+                }
             }
         }
-    }
 
-    private var xAxisLabels: some View {
-        GeometryReader { geo in
-            let vd = visibleData
-            let count = vd.count
-            if count >= 2 {
-                let labelCount = min(5, count)
-                let step = max(1, count / labelCount)
-                ForEach(0..<labelCount, id: \.self) { i in
-                    let idx = min(i * step, count - 1)
-                    let x = geo.size.width * CGFloat(idx) / CGFloat(count - 1)
-                    Text(ChartLayout.timeLabel(for: vd[idx].date, timeframe: timeframe))
-                        .font(.system(size: 8).monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                        .position(x: x, y: ChartLayout.xAxisHeight / 2)
-                }
-            }
+        // Draw in-progress point 1 marker
+        if let p1 = drawingPoint1 {
+            let x = indexToX(p1.index)
+            let y = priceToY(p1.price)
+            context.fill(Path(ellipseIn: CGRect(x: x - 4, y: y - 4, width: 8, height: 8)), with: .color(.orange))
         }
     }
-
-    private func crosshairGestureIndex(location: CGPoint, size: CGSize) -> Int {
-        let vd = visibleData
-        guard vd.count >= 2 else { return 0 }
-        let stepX = size.width / CGFloat(vd.count)
-        return max(0, min(vd.count - 1, Int(location.x / stepX)))
-    }
-
-    private func dragGesture(in size: CGSize) -> some Gesture {
-        #if targetEnvironment(macCatalyst)
-        DragGesture(minimumDistance: 0)
-            .onChanged { drag in
-                crosshairIndex = crosshairGestureIndex(location: drag.location, size: size)
-                isDragging = true
-            }
-            .onEnded { _ in
-                isDragging = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    if !isDragging { crosshairIndex = nil }
-                }
-            }
-        #else
-        LongPressGesture(minimumDuration: 0.2)
-            .sequenced(before: DragGesture(minimumDistance: 0))
-            .onChanged { value in
-                switch value {
-                case .second(true, let drag):
-                    guard let drag else { return }
-                    crosshairIndex = crosshairGestureIndex(location: drag.location, size: size)
-                    isDragging = true
-                default: break
-                }
-            }
-            .onEnded { _ in
-                isDragging = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    if !isDragging { crosshairIndex = nil }
-                }
-            }
-        #endif
-    }
-
-    private var magnificationGesture: some Gesture {
-        MagnificationGesture()
-            .onChanged { value in scale = min(10, max(1, lastScale * value)) }
-            .onEnded { _ in lastScale = scale }
-    }
-
-    private func formatVolShort(_ v: Int64) -> String {
-        if v >= 1_000_000 { return String(format: "%.1fM", Double(v) / 1e6) }
-        if v >= 1_000 { return String(format: "%.0fK", Double(v) / 1e3) }
-        return "\(v)"
-    }
-}
 
 // MARK: - Volume Bars
 struct VolumeBarView: View {
@@ -1749,5 +2118,237 @@ struct ChartInfoSheet: View {
         } icon: {
             Image(systemName: icon).foregroundStyle(color)
         }
+    }
+}
+
+// MARK: - Annotation List Sheet
+struct AnnotationListSheet: View {
+    let hub: TradingHub
+    let symbol: String
+    @StateObject private var store = ChartAnnotationStore.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var editingAnnotation: ChartAnnotation? = nil
+
+    private var annotations: [ChartAnnotation] {
+        store.annotationsFor(hub: hub, symbol: symbol)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if annotations.isEmpty {
+                    VStack(spacing: 16) {
+                        Spacer()
+                        Image(systemName: "pencil.tip.crop.circle")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.secondary.opacity(0.5))
+                        Text("No Annotations")
+                            .font(.headline)
+                        Text("Use the drawing tools to add lines, levels, and labels to your chart.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                        Spacer()
+                    }
+                } else {
+                    List {
+                        ForEach(annotations) { ann in
+                            HStack(spacing: 10) {
+                                Circle()
+                                    .fill(ann.color)
+                                    .frame(width: 12, height: 12)
+                                Image(systemName: ann.tool.icon)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ann.label.isEmpty ? ann.tool.rawValue : ann.label)
+                                        .font(.subheadline)
+                                    Text(ChartLayout.priceFormat(ann.price1))
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button {
+                                    store.toggleVisibility(id: ann.id, hub: hub, symbol: symbol)
+                                } label: {
+                                    Image(systemName: ann.isVisible ? "eye" : "eye.slash")
+                                        .font(.caption)
+                                        .foregroundStyle(ann.isVisible ? .primary : .secondary)
+                                }
+                                .buttonStyle(.plain)
+                                Button {
+                                    editingAnnotation = ann
+                                } label: {
+                                    Image(systemName: "pencil")
+                                        .font(.caption)
+                                        .foregroundStyle(.blue)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .onDelete { indexSet in
+                            for idx in indexSet {
+                                store.remove(id: annotations[idx].id, hub: hub, symbol: symbol)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Annotations — \(symbol)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if !annotations.isEmpty {
+                        Button("Clear All") {
+                            store.clearAll(hub: hub, symbol: symbol)
+                        }
+                        .foregroundStyle(.red)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .sheet(item: $editingAnnotation) { ann in
+                EditAnnotationSheet(annotation: ann, hub: hub, symbol: symbol)
+            }
+        }
+    }
+}
+
+// MARK: - Edit Annotation Sheet
+struct EditAnnotationSheet: View {
+    @State var annotation: ChartAnnotation
+    let hub: TradingHub
+    let symbol: String
+    @StateObject private var store = ChartAnnotationStore.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Label") {
+                    TextField("Name this line", text: $annotation.label)
+                }
+                if annotation.tool == .text {
+                    Section("Text Content") {
+                        TextField("Text", text: Binding(
+                            get: { annotation.textContent ?? "" },
+                            set: { annotation.textContent = $0.isEmpty ? nil : $0 }
+                        ))
+                    }
+                }
+                Section("Color") {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 8) {
+                        ForEach(AnnotationColor.presets) { preset in
+                            Button {
+                                annotation.colorHex = preset.hex
+                            } label: {
+                                ZStack {
+                                    Circle().fill(preset.color).frame(width: 36, height: 36)
+                                    if annotation.colorHex == preset.hex {
+                                        Image(systemName: "checkmark")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(.white)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                Section("Line Width") {
+                    Slider(value: $annotation.lineWidth, in: 0.5...4.0, step: 0.5) {
+                        Text("Width: \(String(format: "%.1f", annotation.lineWidth))")
+                    }
+                    Text("Width: \(String(format: "%.1f", annotation.lineWidth))pt")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Price Level") {
+                    Text(ChartLayout.priceFormat(annotation.price1))
+                        .font(.headline.monospacedDigit())
+                    if let p2 = annotation.price2 {
+                        Text("To: \(ChartLayout.priceFormat(p2))")
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Edit Annotation")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        store.update(annotation, hub: hub, symbol: symbol)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Timezone Picker Sheet
+struct TimezonePickerSheet: View {
+    @EnvironmentObject var portfolio: PortfolioManager
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Chart Timezone") {
+                    Text("All chart timestamps will display in your selected timezone.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("US Timezones") {
+                    ForEach([ChartTimezone.eastern, .central, .mountain, .pacific]) { tz in
+                        timezoneRow(tz)
+                    }
+                }
+                Section("International") {
+                    ForEach([ChartTimezone.utc, .london, .tokyo, .sydney]) { tz in
+                        timezoneRow(tz)
+                    }
+                }
+            }
+            .navigationTitle("Chart Timezone")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func timezoneRow(_ tz: ChartTimezone) -> some View {
+        Button {
+            portfolio.chartTimezone = tz
+            portfolio.saveUserPreferences()
+            HapticManager.selectionFeedback()
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(tz.rawValue)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                    Text(tz.abbreviation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if portfolio.chartTimezone == tz {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(portfolio.activeHub.accentColor)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 }

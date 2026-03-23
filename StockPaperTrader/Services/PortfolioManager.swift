@@ -336,6 +336,7 @@ class PortfolioManager: ObservableObject {
     @Published var accentTheme: AccentTheme = .blue
     @Published var hasCompletedOnboarding: Bool = false
     @Published var hasSelectedInitialHub: Bool = false
+    @Published var chartTimezone: ChartTimezone = .eastern
     @Published var errorMessage: String?
     @Published var lastTradeMessage: String?
 
@@ -700,6 +701,7 @@ class PortfolioManager: ObservableObject {
         UserDefaults.standard.set(accentTheme.rawValue, forKey: "accentTheme")
         UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding")
         UserDefaults.standard.set(hasSelectedInitialHub, forKey: "hasSelectedInitialHub")
+        UserDefaults.standard.set(chartTimezone.rawValue, forKey: "chartTimezone")
         UserDefaults.standard.set(activeHub.rawValue, forKey: "activeHub")
         if let d = try? JSONEncoder().encode(enabledHubs) { UserDefaults.standard.set(d, forKey: "enabledHubs") }
     }
@@ -715,6 +717,8 @@ class PortfolioManager: ObservableObject {
            let saved = try? JSONDecoder().decode(Set<TradingHub>.self, from: d) { enabledHubs = saved }
         if let t = UserDefaults.standard.string(forKey: "accentTheme"),
            let theme = AccentTheme(rawValue: t) { accentTheme = theme }
+        if let tz = UserDefaults.standard.string(forKey: "chartTimezone"),
+           let zone = ChartTimezone(rawValue: tz) { chartTimezone = zone }
     }
 
     /// Migrate old shared portfolio data into Paper hub on first launch

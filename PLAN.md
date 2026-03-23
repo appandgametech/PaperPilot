@@ -46,6 +46,18 @@ PaperPilot is one app that contains 3 fully separate mini-apps. When you select 
 
 ## Implementation Status — ALL PHASES COMPLETE ✅
 
+### Phase 5: App Launcher Home Screen ✅
+- [x] Full-screen AppLauncherView shows on first launch (after onboarding)
+- [x] 3 rich app cards: Paper, Equities, Futures — each with purpose, trading mode, integration, features, tab count
+- [x] Tapping a card sets activeHub and enters that app's tab view
+- [x] Hub switcher bar remains for switching between apps after initial selection
+- [x] `hasSelectedInitialHub` persisted in PortfolioManager — launcher only shows once
+- [x] Onboarding updated: "3 Apps in 1" page added, welcome page updated to mention all 3 platforms
+- [x] "Why 3 apps in 1" explanation on launcher: choose integration, platform, automation level
+- [x] Old HubLauncherView sheet removed — replaced by inline full-screen launcher
+- [x] Files: ContentView.swift, PortfolioManager.swift, OnboardingView.swift
+- [x] Committed `b0e80db` and pushed
+
 ### Phase 1: Hub Branding on Every Screen ✅
 - [x] Every view has hub-prefixed nav title ("Paper Charts", "Alpaca Trade", "Futures Analytics")
 - [x] Tab bar tint = hub accent color (green/blue/orange)

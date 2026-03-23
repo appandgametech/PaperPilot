@@ -40,6 +40,7 @@ struct SettingsView: View {
                 refreshSection
                 portfolioSection
                 appearanceSection
+                chartTimezoneSection
                 safetyControlsSection
                 hubVisibilitySection
                 aboutSection
@@ -376,6 +377,22 @@ struct SettingsView: View {
             }
         } header: {
             Text("Appearance")
+        }
+    }
+
+    // MARK: - Chart Timezone
+    private var chartTimezoneSection: some View {
+        Section {
+            Picker("Chart Timezone", selection: $portfolio.chartTimezone) {
+                ForEach(ChartTimezone.allCases) { tz in
+                    Text("\(tz.rawValue) (\(tz.abbreviation))").tag(tz)
+                }
+            }
+            .onChange(of: portfolio.chartTimezone) { _, _ in
+                portfolio.saveUserPreferences()
+            }
+        } header: {
+            Text("Charts")
         }
     }
 
